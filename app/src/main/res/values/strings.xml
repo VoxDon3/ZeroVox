@@ -7,6 +7,8 @@
     <string name="nav_console">Console</string>
     <string name="status_connected">PS5 connected</string>
     <string name="status_unpaired">Not paired</string>
+    <string name="status_checking">Checking PS5…</string>
+    <string name="status_offline">PS5 offline</string>
 
     <string name="setup_title">Connect your phone to PS5</string>
     <string name="setup_subtitle">Download games on your phone and send them to PlayStation over your local network, or manage the console download queue directly.</string>
@@ -15,7 +17,7 @@
     <string name="hint_port">Port</string>
     <string name="label_pair_code">Pairing code</string>
     <string name="pair_code_hint">6-digit pairing code</string>
-    <string name="setup_hint">Start the Orbit service on PS5, then open App settings → Pair a device.</string>
+    <string name="setup_hint">Start the PS5 companion service, then open App settings → Pair a device.</string>
     <string name="setup_show_code">Show code on PS5</string>
     <string name="setup_show_requested">Requesting the code…</string>
     <string name="setup_show_success">On PS5, open App settings → Pair a device to see the code.</string>
@@ -26,18 +28,24 @@
     <string name="pair_success">Paired successfully.</string>
     <string name="pair_failed">Pairing failed: %1$s</string>
     <string name="setup_tips_title">Before you start</string>
-    <string name="setup_tips_body">1) Phone and PS5 on the same Wi-Fi network.\n2) The Orbit service is running on the console (orbit_store.elf or the TV app).\n3) The code appears on the PlayStation screen for a short time.\n4) Never share the code with anyone.</string>
+    <string name="setup_tips_body">1) Phone and PS5 on the same Wi-Fi network.\n2) The PS5 companion service is running on the console.\n3) The code appears on the PlayStation screen for a short time.\n4) Never share the code with anyone.</string>
 
     <string name="catalog_title">Catalogue</string>
     <string name="catalog_not_loaded">Catalogue has not been loaded yet.</string>
-    <string name="catalog_games_ready">%1$d games ready.</string>
+    <plurals name="catalog_games_ready">
+        <item quantity="one">%1$d game ready.</item>
+        <item quantity="other">%1$d games ready.</item>
+    </plurals>
     <string name="catalog_refresh">Refresh catalogue</string>
     <string name="refreshing">Refreshing…</string>
     <string name="catalog_refresh_failed">Refresh failed: %1$s</string>
     <string name="search_hint">Search by name or Title ID</string>
     <string name="filter_all">All</string>
     <string name="loading_catalog">Loading catalogue…</string>
-    <string name="catalog_count">%1$d of %2$d games</string>
+    <plurals name="catalog_count">
+        <item quantity="one">%1$d of %2$d game</item>
+        <item quantity="other">%1$d of %2$d games</item>
+    </plurals>
     <string name="catalog_count_none">No data yet</string>
     <string name="catalog_error_detail">Could not load the catalogue.\n%1$s</string>
     <string name="catalog_empty">No games in the catalogue.</string>
@@ -96,18 +104,24 @@
     <string name="reading">Reading…</string>
     <string name="unpair">Unpair</string>
     <string name="ps5_storage">PS5 storage</string>
-    <string name="catalog_summary">%1$d games · revision %2$d</string>
+    <plurals name="catalog_summary">
+        <item quantity="one">%1$d game · revision %2$d</item>
+        <item quantity="other">%1$d games · revision %2$d</item>
+    </plurals>
     <string name="load_failed_short">Failed: %1$s</string>
     <string name="about_title">About</string>
     <string name="about_body">Zero Vox for Android — an independent app for managing PS5 downloads and sending files from the phone over the local network.\nThe app does not host any games; use it only with content you are allowed to use.</string>
     <string name="version">Version %1$s</string>
-    <string name="service_status">Orbit service: %1$s</string>
-    <string name="service_status_power">Orbit service: %1$s · State: %2$s</string>
+    <string name="service_status">PS5 service: %1$s</string>
+    <string name="service_status_power">PS5 service: %1$s · State: %2$s</string>
     <string name="device_status_failed">Could not read the console status.</string>
     <string name="no_storage">No storage available.</string>
     <string name="storage_free_of">%1$s free of %2$s</string>
     <string name="external">External</string>
-    <string name="options_summary">%1$s · %2$d options</string>
+    <plurals name="options_summary">
+        <item quantity="one">%1$s · %2$d option</item>
+        <item quantity="other">%1$s · %2$d options</item>
+    </plurals>
     <string name="view_options">View options →</string>
     <string name="language_title">Language</string>
     <string name="language_choose">Choose app language</string>
@@ -178,7 +192,10 @@
     <string name="cheats_title">Cheats</string>
     <string name="cheats_subtitle">Installed games detected by CheatRunner, with all cheat file types.</string>
     <string name="cheats_search_hint">Search installed games</string>
-    <string name="cheats_count">%1$d installed games</string>
+    <plurals name="cheats_count">
+        <item quantity="one">%1$d installed game</item>
+        <item quantity="other">%1$d installed games</item>
+    </plurals>
     <string name="cheats_status_error">CheatRunner unavailable</string>
     <string name="cheats_loading">Loading installed games…</string>
     <string name="cheats_empty">No installed games were found.</string>
@@ -200,7 +217,10 @@
     <string name="cheats_no_file">No cheat file was found for this game.</string>
     <string name="cheats_no_file_hint">Add a JSON, SHN, or MC4 cheat file for this title in CheatRunner.</string>
     <string name="cheats_state_failed">Could not read cheats: %1$s</string>
-    <string name="cheats_summary">%1$d on · %2$d off · %3$d not ready</string>
+    <plurals name="cheats_summary">
+        <item quantity="one">%1$d on · %2$d off · %3$d not ready</item>
+        <item quantity="other">%1$d on · %2$d off · %3$d not ready</item>
+    </plurals>
     <string name="cheats_format">Cheat format: %1$s</string>
     <string name="cheats_game_running">The game is running. Cheats can be toggled.</string>
     <string name="cheats_game_not_running">The game is not running. Launch it first to enable cheats.</string>

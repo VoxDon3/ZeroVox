@@ -7,6 +7,8 @@
     <string name="nav_console">콘솔</string>
     <string name="status_connected">PS5 연결됨</string>
     <string name="status_unpaired">연결 안 됨</string>
+    <string name="status_checking">PS5 확인 중…</string>
+    <string name="status_offline">PS5 오프라인</string>
 
     <string name="setup_title">휴대폰을 PS5에 연결하세요</string>
     <string name="setup_subtitle">휴대폰에 게임을 다운로드해 로컬 네트워크로 PlayStation에 보내거나, 콘솔의 다운로드 대기열을 직접 관리하세요.</string>
@@ -15,7 +17,7 @@
     <string name="hint_port">포트</string>
     <string name="label_pair_code">페어링 코드</string>
     <string name="pair_code_hint">6자리 페어링 코드</string>
-    <string name="setup_hint">PS5에서 Orbit 서비스를 시작한 뒤 앱 설정 → 기기 페어링을 여세요.</string>
+    <string name="setup_hint">PS5 보조 서비스를 시작한 뒤 앱 설정 → 기기 페어링을 여세요.</string>
     <string name="setup_show_code">PS5에 코드 표시</string>
     <string name="setup_show_requested">코드 요청 중…</string>
     <string name="setup_show_success">PS5에서 앱 설정 → 기기 페어링을 열면 코드가 표시됩니다.</string>
@@ -26,18 +28,22 @@
     <string name="pair_success">페어링되었습니다.</string>
     <string name="pair_failed">페어링 실패: %1$s</string>
     <string name="setup_tips_title">시작하기 전에</string>
-    <string name="setup_tips_body">1) 휴대폰과 PS5를 같은 Wi-Fi 네트워크에 연결하세요.\n2) 콘솔에서 Orbit 서비스가 실행 중이어야 합니다(orbit_store.elf 또는 TV 앱).\n3) 코드는 PlayStation 화면에 잠시만 표시됩니다.\n4) 코드를 다른 사람과 공유하지 마세요.</string>
+    <string name="setup_tips_body">1) 휴대폰과 PS5를 같은 Wi-Fi 네트워크에 연결하세요.\n2) 콘솔에서 PS5 보조 서비스가 실행 중이어야 합니다.\n3) 코드는 PlayStation 화면에 잠시만 표시됩니다.\n4) 코드를 다른 사람과 공유하지 마세요.</string>
 
     <string name="catalog_title">카탈로그</string>
     <string name="catalog_not_loaded">카탈로그가 아직 로드되지 않았습니다.</string>
-    <string name="catalog_games_ready">게임 %1$d개 준비됨.</string>
+    <plurals name="catalog_games_ready">
+        <item quantity="other">게임 %1$d개 준비됨.</item>
+    </plurals>
     <string name="catalog_refresh">카탈로그 새로 고침</string>
     <string name="refreshing">새로 고치는 중…</string>
     <string name="catalog_refresh_failed">새로 고침 실패: %1$s</string>
     <string name="search_hint">이름 또는 Title ID로 검색</string>
     <string name="filter_all">전체</string>
     <string name="loading_catalog">카탈로그 로드 중…</string>
-    <string name="catalog_count">게임 %2$d개 중 %1$d개</string>
+    <plurals name="catalog_count">
+        <item quantity="other">게임 %2$d개 중 %1$d개</item>
+    </plurals>
     <string name="catalog_count_none">아직 데이터가 없습니다</string>
     <string name="catalog_error_detail">카탈로그를 로드할 수 없습니다.\n%1$s</string>
     <string name="catalog_empty">카탈로그에 게임이 없습니다.</string>
@@ -96,18 +102,22 @@
     <string name="reading">읽는 중…</string>
     <string name="unpair">페어링 해제</string>
     <string name="ps5_storage">PS5 저장 공간</string>
-    <string name="catalog_summary">게임 %1$d개 · 리비전 %2$d</string>
+    <plurals name="catalog_summary">
+        <item quantity="other">게임 %1$d개 · 리비전 %2$d</item>
+    </plurals>
     <string name="load_failed_short">실패: %1$s</string>
     <string name="about_title">정보</string>
     <string name="about_body">Zero Vox Android — PS5 다운로드를 관리하고 로컬 네트워크를 통해 휴대폰에서 파일을 전송하는 독립 앱입니다.\n이 앱은 게임을 호스팅하지 않습니다. 사용 권한이 있는 콘텐츠에만 사용하세요.</string>
     <string name="version">버전 %1$s</string>
-    <string name="service_status">Orbit 서비스: %1$s</string>
-    <string name="service_status_power">Orbit 서비스: %1$s · 상태: %2$s</string>
+    <string name="service_status">PS5 서비스: %1$s</string>
+    <string name="service_status_power">PS5 서비스: %1$s · 상태: %2$s</string>
     <string name="device_status_failed">콘솔 상태를 읽을 수 없습니다.</string>
     <string name="no_storage">사용 가능한 저장 공간이 없습니다.</string>
     <string name="storage_free_of">%2$s 중 %1$s 남음</string>
     <string name="external">외장</string>
-    <string name="options_summary">%1$s · 옵션 %2$d개</string>
+    <plurals name="options_summary">
+        <item quantity="other">%1$s · 옵션 %2$d개</item>
+    </plurals>
     <string name="view_options">옵션 보기 →</string>
     <string name="language_title">언어</string>
     <string name="language_choose">앱 언어 선택</string>
@@ -178,7 +188,9 @@
     <string name="cheats_title">치트</string>
     <string name="cheats_subtitle">CheatRunner가 감지한 설치된 게임과 모든 치트 파일 형식입니다.</string>
     <string name="cheats_search_hint">설치된 게임 검색</string>
-    <string name="cheats_count">설치된 게임 %1$d개</string>
+    <plurals name="cheats_count">
+        <item quantity="other">설치된 게임 %1$d개</item>
+    </plurals>
     <string name="cheats_status_error">CheatRunner 사용 불가</string>
     <string name="cheats_loading">설치된 게임 불러오는 중…</string>
     <string name="cheats_empty">설치된 게임을 찾지 못했습니다.</string>
@@ -200,7 +212,9 @@
     <string name="cheats_no_file">이 게임의 치트 파일을 찾지 못했습니다.</string>
     <string name="cheats_no_file_hint">CheatRunner에 이 타이틀의 JSON, SHN 또는 MC4 치트 파일을 추가하세요.</string>
     <string name="cheats_state_failed">치트를 읽을 수 없습니다: %1$s</string>
-    <string name="cheats_summary">%1$d 켜짐 · %2$d 꺼짐 · %3$d 준비 안 됨</string>
+    <plurals name="cheats_summary">
+        <item quantity="other">%1$d 켜짐 · %2$d 꺼짐 · %3$d 준비 안 됨</item>
+    </plurals>
     <string name="cheats_format">치트 형식: %1$s</string>
     <string name="cheats_game_running">게임이 실행 중입니다. 치트를 전환할 수 있습니다.</string>
     <string name="cheats_game_not_running">게임이 실행 중이 아닙니다. 치트를 사용하려면 먼저 실행하세요.</string>

@@ -77,7 +77,7 @@ class TransferService : Service() {
             val request = Request.Builder()
                 .url(url)
                 .header("Accept-Encoding", "identity")
-                .header("User-Agent", "ZeroVoxAndroid/1.0.1")
+                .header("User-Agent", "ZeroVoxAndroid/${BuildConfig.VERSION_NAME}")
                 .get()
                 .build()
 

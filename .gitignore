@@ -10,4 +10,7 @@ captures/
 .cxx/
 *.apk
 *.aab
-!ZeroVox-1.0.1-debug.apk
+keystore.properties
+*.jks
+*.keystore
+zerovox-release/

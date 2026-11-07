@@ -23,11 +23,10 @@ data class Resp(val code: Int, val body: String, val error: String? = null) {
         null
     }
     fun message(): String {
-        val j = json()
-        return j?.optString("error").takeUnless { it.isNullOrBlank() }
-            ?: error
-            ?: body.take(300)
-            ?: ("HTTP $code")
+        val apiError = json()?.optString("error")?.takeIf { it.isNotBlank() }
+        if (apiError != null) return apiError
+        if (!error.isNullOrBlank()) return error
+        return body.trim().take(300).ifBlank { "HTTP $code" }
     }
 }
 

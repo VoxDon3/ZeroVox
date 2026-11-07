@@ -1,6 +1,7 @@
 package com.orbit.zero
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.app.AlertDialog
 import android.app.Dialog
 import android.content.Context
@@ -73,6 +74,7 @@ class MainActivity : ComponentActivity() {
     private var platform = "all"
     private var refreshRunnable: Runnable? = null
     private var refreshing = false
+    private var connectionCheckRunning = false
     private var setupAfterPair = "catalog"
 
     private var cheatGames: List<CheatGame> = emptyList()
@@ -116,6 +118,11 @@ class MainActivity : ComponentActivity() {
             else -> showCatalog()
         }
         loadCatalog(false)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (::statusPill.isInitialized) refreshConnectionPill()
     }
 
     private fun confirmExit() {
@@ -172,6 +179,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    @SuppressLint("SetTextI18n")
     private fun buildShell() {
         val isDark = Palette.dark
         val outer = FrameLayout(this).apply {
@@ -338,22 +346,46 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun updateConnectionPill() {
-        if (prefs.paired) {
-            statusPill.text = getString(R.string.status_connected)
-            statusPill.setTextColor(Palette.success)
-            statusPill.setCompoundDrawablesRelativeWithIntrinsicBounds(statusDot(Palette.success), null, null, null)
-            statusPill.background = glassDrawable(
-                30, Palette.connectedTop, Palette.connectedBottom,
-                Color.parseColor(Palette.connectedStroke), mid = Palette.connectedMid
-            )
-        } else {
-            statusPill.text = getString(R.string.status_unpaired)
-            statusPill.setTextColor(Palette.danger)
-            statusPill.setCompoundDrawablesRelativeWithIntrinsicBounds(statusDot(Palette.danger), null, null, null)
-            statusPill.background = glassDrawable(
-                30, Palette.unpairedTop, Palette.unpairedBottom,
-                Color.parseColor(Palette.unpairedStroke), mid = Palette.unpairedMid
-            )
+        setConnectionPill(
+            getString(if (prefs.paired) R.string.status_connected else R.string.status_unpaired),
+            if (prefs.paired) Palette.success else Palette.danger,
+            prefs.paired,
+        )
+    }
+
+    private fun setConnectionPill(text: String, color: Int, connected: Boolean) {
+        statusPill.text = text
+        statusPill.setTextColor(color)
+        statusPill.setCompoundDrawablesRelativeWithIntrinsicBounds(statusDot(color), null, null, null)
+        statusPill.background = if (connected) glassDrawable(
+            30, Palette.connectedTop, Palette.connectedBottom,
+            Color.parseColor(Palette.connectedStroke), mid = Palette.connectedMid
+        ) else glassDrawable(
+            30, Palette.unpairedTop, Palette.unpairedBottom,
+            Color.parseColor(Palette.unpairedStroke), mid = Palette.unpairedMid
+        )
+    }
+
+    private fun refreshConnectionPill() {
+        if (!prefs.paired) {
+            updateConnectionPill()
+            return
+        }
+        if (connectionCheckRunning) return
+        connectionCheckRunning = true
+        setConnectionPill(getString(R.string.status_checking), Palette.textSecondary, false)
+        io.execute {
+            val online = api.system().ok
+            runOnUiThread {
+                connectionCheckRunning = false
+                if (!prefs.paired) {
+                    updateConnectionPill()
+                } else if (online) {
+                    updateConnectionPill()
+                } else {
+                    setConnectionPill(getString(R.string.status_offline), Palette.danger, false)
+                }
+            }
         }
     }
 
@@ -375,6 +407,7 @@ class MainActivity : ComponentActivity() {
 
     // ------------------------------------------------------------------ setup
 
+    @SuppressLint("SetTextI18n")
     private fun showSetup(afterPair: String = "catalog") {
         setupAfterPair = afterPair
         tab = "setup"
@@ -449,7 +482,7 @@ class MainActivity : ComponentActivity() {
                 runOnUiThread {
                     if (r.ok && token.length == 64) {
                         prefs.token = token
-                        updateConnectionPill()
+                        refreshConnectionPill()
                         status.text = getString(R.string.pair_success)
                         loadStorage {
                             if (tab == "setup") setTab(setupAfterPair)
@@ -479,7 +512,11 @@ class MainActivity : ComponentActivity() {
         catalogCard.addView(spacer(4))
         val catStatus = bodyText(
             if (CatalogRepo.games.isEmpty()) getString(R.string.catalog_not_loaded)
-            else getString(R.string.catalog_games_ready, CatalogRepo.games.size)
+            else resources.getQuantityString(
+                R.plurals.catalog_games_ready,
+                CatalogRepo.games.size,
+                CatalogRepo.games.size,
+            )
         )
         catalogCard.addView(catStatus)
         catalogCard.addView(spacer(10))
@@ -488,8 +525,11 @@ class MainActivity : ComponentActivity() {
             io.execute {
                 val ok = CatalogRepo.load(this@MainActivity, true)
                 runOnUiThread {
-                    catStatus.text = if (ok) getString(R.string.catalog_games_ready, CatalogRepo.games.size)
-                    else getString(R.string.catalog_refresh_failed, CatalogRepo.lastError ?: "")
+                    catStatus.text = if (ok) resources.getQuantityString(
+                        R.plurals.catalog_games_ready,
+                        CatalogRepo.games.size,
+                        CatalogRepo.games.size,
+                    ) else getString(R.string.catalog_refresh_failed, CatalogRepo.lastError ?: "")
                 }
             }
         })
@@ -623,7 +663,7 @@ class MainActivity : ComponentActivity() {
             .toList()
         catalogAdapter?.submit(filtered)
         catalogCount?.text = if (all.isEmpty()) getString(R.string.catalog_count_none)
-        else getString(R.string.catalog_count, filtered.size, all.size)
+        else resources.getQuantityString(R.plurals.catalog_count, all.size, filtered.size, all.size)
         val empty = filtered.isEmpty()
         catalogList?.visibility = if (empty) View.GONE else View.VISIBLE
         catalogEmpty?.visibility = if (empty) View.VISIBLE else View.GONE
@@ -661,10 +701,13 @@ class MainActivity : ComponentActivity() {
             background = glassDrawable(28)
             setPadding(dpx(18), dpx(18), dpx(18), dpx(18))
         }
-        val scroll = ScrollView(this).apply { isFillViewport = false }
+        val scroll = ScrollView(this).apply { isFillViewport = true }
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         scroll.addView(col)
-        wrap.addView(scroll)
+        wrap.addView(scroll, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            (resources.displayMetrics.heightPixels * 0.72f).toInt(),
+        ))
 
         val head = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -1086,7 +1129,7 @@ class MainActivity : ComponentActivity() {
 
     private fun showSettingsDialog() {
         val dialog = Dialog(this)
-        val scroll = ScrollView(this)
+        val scroll = ScrollView(this).apply { isFillViewport = true }
         val col = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dpx(20), dpx(20), dpx(20), dpx(18))
@@ -1182,7 +1225,7 @@ class MainActivity : ComponentActivity() {
         dialog.show()
         dialog.window?.setLayout(
             (resources.displayMetrics.widthPixels * 0.92f).toInt(),
-            WindowManager.LayoutParams.WRAP_CONTENT
+            (resources.displayMetrics.heightPixels * 0.85f).toInt()
         )
         dialog.window?.decorView?.layoutDirection = resources.configuration.layoutDirection
     }
@@ -1283,7 +1326,12 @@ class MainActivity : ComponentActivity() {
 
         val catCard = glassCard(16)
         catCard.addView(accentText(getString(R.string.catalog_title)))
-        val catText = bodyText(getString(R.string.catalog_summary, CatalogRepo.games.size, CatalogRepo.revision))
+        val catText = bodyText(resources.getQuantityString(
+            R.plurals.catalog_summary,
+            CatalogRepo.games.size,
+            CatalogRepo.games.size,
+            CatalogRepo.revision,
+        ))
         catCard.addView(catText)
         catCard.addView(spacer(10))
         catCard.addView(actionButton(getString(R.string.catalog_refresh), false) {
@@ -1291,8 +1339,11 @@ class MainActivity : ComponentActivity() {
             io.execute {
                 val ok = CatalogRepo.load(this@MainActivity, true)
                 runOnUiThread {
-                    catText.text = if (ok) getString(
-                        R.string.catalog_summary, CatalogRepo.games.size, CatalogRepo.revision
+                    catText.text = if (ok) resources.getQuantityString(
+                        R.plurals.catalog_summary,
+                        CatalogRepo.games.size,
+                        CatalogRepo.games.size,
+                        CatalogRepo.revision,
                     ) else getString(R.string.load_failed_short, CatalogRepo.lastError ?: "")
                 }
             }
@@ -1306,7 +1357,9 @@ class MainActivity : ComponentActivity() {
         about.addView(bodyText(getString(R.string.about_body)))
         col.addView(about)
         col.addView(spacer(10))
-        col.addView(bodyText(getString(R.string.version, "1.0.1")).apply { setTextColor(Palette.textDim) })
+        col.addView(bodyText(getString(R.string.version, BuildConfig.VERSION_NAME)).apply {
+            setTextColor(Palette.textDim)
+        })
 
         if (prefs.paired) {
             io.execute {
@@ -1456,7 +1509,7 @@ class MainActivity : ComponentActivity() {
         cheatsStatus?.text = when {
             cheatsLoading -> getString(R.string.cheats_loading)
             cheatsError != null -> getString(R.string.cheats_status_error)
-            else -> getString(R.string.cheats_count, filtered.size)
+            else -> resources.getQuantityString(R.plurals.cheats_count, filtered.size, filtered.size)
         }
 
         if (cheatsError != null && cheatGames.isEmpty()) {
@@ -1722,8 +1775,9 @@ class MainActivity : ComponentActivity() {
                     status.text = getString(R.string.cheats_state_failed, r.message())
                     return@runOnUiThread
                 }
-                status.text = getString(
-                    R.string.cheats_summary,
+                status.text = resources.getQuantityString(
+                    R.plurals.cheats_summary,
+                    state.mods.size,
                     state.summaryOn,
                     state.summaryOff,
                     state.summaryNotReady,
@@ -1936,10 +1990,11 @@ class MainActivity : ComponentActivity() {
             }
             bottom.addView(
                 accentText(
-                    getString(
-                        R.string.options_summary,
+                    resources.getQuantityString(
+                        R.plurals.options_summary,
+                        game.options.size,
                         Ps5Client.formatBytes(game.bestSize),
-                        game.options.size
+                        game.options.size,
                     ),
                     11f
                 ),

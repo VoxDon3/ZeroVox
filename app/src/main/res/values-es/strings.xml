@@ -7,6 +7,8 @@
     <string name="nav_console">Consola</string>
     <string name="status_connected">PS5 conectada</string>
     <string name="status_unpaired">Sin emparejar</string>
+    <string name="status_checking">Comprobando PS5…</string>
+    <string name="status_offline">PS5 sin conexión</string>
 
     <string name="setup_title">Conecta tu teléfono a la PS5</string>
     <string name="setup_subtitle">Descarga juegos en tu teléfono y envíalos a PlayStation por la red local, o gestiona directamente la cola de descargas de la consola.</string>
@@ -15,7 +17,7 @@
     <string name="hint_port">Puerto</string>
     <string name="label_pair_code">Código de emparejamiento</string>
     <string name="pair_code_hint">Código de emparejamiento de 6 dígitos</string>
-    <string name="setup_hint">Inicia el servicio Orbit en la PS5 y abre Ajustes de la aplicación → Emparejar un dispositivo.</string>
+    <string name="setup_hint">Inicia el servicio complementario de PS5 y abre Ajustes de la aplicación → Emparejar un dispositivo.</string>
     <string name="setup_show_code">Mostrar código en la PS5</string>
     <string name="setup_show_requested">Solicitando el código…</string>
     <string name="setup_show_success">En la PS5, abre Ajustes de la aplicación → Emparejar un dispositivo para ver el código.</string>
@@ -26,18 +28,26 @@
     <string name="pair_success">Emparejado correctamente.</string>
     <string name="pair_failed">Error de emparejamiento: %1$s</string>
     <string name="setup_tips_title">Antes de empezar</string>
-    <string name="setup_tips_body">1) El teléfono y la PS5 en la misma red Wi-Fi.\n2) El servicio Orbit está activo en la consola (orbit_store.elf o la app de TV).\n3) El código aparece en la pantalla de PlayStation durante poco tiempo.\n4) No compartas el código con nadie.</string>
+    <string name="setup_tips_body">1) El teléfono y la PS5 en la misma red Wi-Fi.\n2) El servicio complementario de PS5 está activo en la consola.\n3) El código aparece en la pantalla de PlayStation durante poco tiempo.\n4) No compartas el código con nadie.</string>
 
     <string name="catalog_title">Catálogo</string>
     <string name="catalog_not_loaded">El catálogo aún no se ha cargado.</string>
-    <string name="catalog_games_ready">%1$d juegos listos.</string>
+    <plurals name="catalog_games_ready">
+        <item quantity="one">%1$d juego listo.</item>
+        <item quantity="other">%1$d juegos listos.</item>
+        <item quantity="many">%1$d juegos listos.</item>
+    </plurals>
     <string name="catalog_refresh">Actualizar catálogo</string>
     <string name="refreshing">Actualizando…</string>
     <string name="catalog_refresh_failed">Error al actualizar: %1$s</string>
     <string name="search_hint">Buscar por nombre o Title ID</string>
     <string name="filter_all">Todos</string>
     <string name="loading_catalog">Cargando catálogo…</string>
-    <string name="catalog_count">%1$d de %2$d juegos</string>
+    <plurals name="catalog_count">
+        <item quantity="one">%1$d de %2$d juego</item>
+        <item quantity="other">%1$d de %2$d juegos</item>
+        <item quantity="many">%1$d de %2$d juegos</item>
+    </plurals>
     <string name="catalog_count_none">Aún no hay datos</string>
     <string name="catalog_error_detail">No se pudo cargar el catálogo.\n%1$s</string>
     <string name="catalog_empty">No hay juegos en el catálogo.</string>
@@ -96,18 +106,26 @@
     <string name="reading">Leyendo…</string>
     <string name="unpair">Desemparejar</string>
     <string name="ps5_storage">Almacenamiento de PS5</string>
-    <string name="catalog_summary">%1$d juegos · revisión %2$d</string>
+    <plurals name="catalog_summary">
+        <item quantity="one">%1$d juego · revisión %2$d</item>
+        <item quantity="other">%1$d juegos · revisión %2$d</item>
+        <item quantity="many">%1$d juegos · revisión %2$d</item>
+    </plurals>
     <string name="load_failed_short">Error: %1$s</string>
     <string name="about_title">Acerca de</string>
     <string name="about_body">Zero Vox para Android — una aplicación independiente para gestionar descargas de PS5 y enviar archivos desde el teléfono por la red local.\nLa aplicación no aloja ningún juego; úsala solo con contenido que tengas permiso de usar.</string>
     <string name="version">Versión %1$s</string>
-    <string name="service_status">Servicio Orbit: %1$s</string>
-    <string name="service_status_power">Servicio Orbit: %1$s · Estado: %2$s</string>
+    <string name="service_status">Servicio de PS5: %1$s</string>
+    <string name="service_status_power">Servicio de PS5: %1$s · Estado: %2$s</string>
     <string name="device_status_failed">No se pudo leer el estado de la consola.</string>
     <string name="no_storage">No hay almacenamiento disponible.</string>
     <string name="storage_free_of">%1$s libres de %2$s</string>
     <string name="external">Externo</string>
-    <string name="options_summary">%1$s · %2$d opciones</string>
+    <plurals name="options_summary">
+        <item quantity="one">%1$s · %2$d opción</item>
+        <item quantity="other">%1$s · %2$d opciones</item>
+        <item quantity="many">%1$s · %2$d opciones</item>
+    </plurals>
     <string name="view_options">Ver opciones →</string>
     <string name="language_title">Idioma</string>
     <string name="language_choose">Elegir idioma de la aplicación</string>
@@ -178,7 +196,11 @@
     <string name="cheats_title">Trucos</string>
     <string name="cheats_subtitle">Juegos instalados detectados por CheatRunner, con todos los formatos de archivos de trucos.</string>
     <string name="cheats_search_hint">Buscar en juegos instalados</string>
-    <string name="cheats_count">%1$d juegos instalados</string>
+    <plurals name="cheats_count">
+        <item quantity="one">%1$d juego instalado</item>
+        <item quantity="other">%1$d juegos instalados</item>
+        <item quantity="many">%1$d juegos instalados</item>
+    </plurals>
     <string name="cheats_status_error">CheatRunner no disponible</string>
     <string name="cheats_loading">Cargando juegos instalados…</string>
     <string name="cheats_empty">No se encontraron juegos instalados.</string>
@@ -200,7 +222,11 @@
     <string name="cheats_no_file">No se encontró ningún archivo de trucos para este juego.</string>
     <string name="cheats_no_file_hint">Añade un archivo JSON, SHN o MC4 para este título en CheatRunner.</string>
     <string name="cheats_state_failed">No se pudieron leer los trucos: %1$s</string>
-    <string name="cheats_summary">%1$d activos · %2$d inactivos · %3$d no listos</string>
+    <plurals name="cheats_summary">
+        <item quantity="one">%1$d activo · %2$d inactivo · %3$d no listo</item>
+        <item quantity="other">%1$d activos · %2$d inactivos · %3$d no listos</item>
+        <item quantity="many">%1$d activos · %2$d inactivos · %3$d no listos</item>
+    </plurals>
     <string name="cheats_format">Formato de trucos: %1$s</string>
     <string name="cheats_game_running">El juego está en ejecución. Se pueden cambiar los trucos.</string>
     <string name="cheats_game_not_running">El juego no está en ejecución. Inícialo para activar los trucos.</string>

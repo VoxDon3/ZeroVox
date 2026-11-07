@@ -39,10 +39,18 @@
 
 ## التثبيت
 
-1. نزّل ملف APK من [صفحة الإصدارات](https://github.com/VoxDon3/ZeroVox/releases/latest) أو من [الرابط المباشر](https://github.com/VoxDon3/ZeroVox/releases/download/v1.0.1/ZeroVox-1.0.1-debug.apk).
+1. نزّل ملف APK من [صفحة الإصدارات](https://github.com/VoxDon3/ZeroVox/releases/latest) أو من [الرابط المباشر](https://github.com/VoxDon3/ZeroVox/releases/download/v1.0.2/ZeroVox-1.0.2-release.apk).
 2. اسمح بتثبيت التطبيقات من المصدر غير المعروف إذا طلب النظام ذلك.
 3. افتح Zero Vox، ثم أدخل عنوان PS5 ورمز الاقتران من الإعدادات.
 4. بعد الاقتران، افتح تبويب **Games** لتحميل الكتالوج.
+
+> **مهم:** الإصدار 1.0.2 موقّع بمفتاح إصدار جديد. إذا كان الإصدار 1.0.1 المثبت نسخة debug، فأزل التطبيق القديم أولًا؛ لن يُحدّث تلقائيًا إلى نسخة release. إزالة التطبيق تحذف بياناته المحلية.
+
+بصمة SHA-256 لملف APK:
+
+```text
+80282a638e8a0f22dd8e868bb903205b19998d9751fa649a1b38dfc5ea0ae6c6
+```
 
 ## إعداد CheatRunner
 
@@ -56,19 +64,28 @@
 ```bash
 git clone https://github.com/VoxDon3/ZeroVox.git
 cd ZeroVox
-./gradlew assembleDebug
+./gradlew testDebugUnitTest lintDebug assembleDebug
 ```
 
-ينتج ملف APK في:
+ينتج ملف APK للتطوير في:
 
 ```text
 app/build/outputs/apk/debug/app-debug.apk
 ```
 
+لبناء نسخة release موقّعة، أنشئ `keystore.properties` في جذر المشروع (وهو مستبعد من git) بالحقول `storeFile` و`storePassword` و`keyAlias` و`keyPassword`، ثم:
+
+```bash
+./gradlew assembleRelease
+```
+
+بدون `keystore.properties` سيُبنى APK release غير موقّع.
+
 ## الخصوصية والاستخدام
 
 - لا يجمع التطبيق بيانات شخصية ولا يرسلها إلى خوادم تابعة له.
 - عناوين الاتصال ورمز الاقتران تُحفظ محليًا على الهاتف فقط.
+- يستخدم التطبيق HTTP على الشبكة المحلية للاتصال بخدمة PS5 وCheatRunner، ولا يرسل بيانات إلى خوادم خارجية تابعة له.
 - لا تشارك رمز الاقتران مع أي شخص.
 - Zero Vox أداة إدارة محلية مستقلة، وليست بديلًا عن خدمات PlayStation الرسمية.
 - استخدم التطبيق فقط مع المحتوى الذي تملك حق الوصول إليه أو استخدامه.
