@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="bg_deep">#05070D</color>
+    <color name="bg_light">#F2F7FB</color>
+    <color name="neon_light">#007C9E</color>
+    <color name="bg_navy">#08131F</color>
+    <color name="glass_fill">#B3121A27</color>
+    <color name="glass_fill_soft">#800A1018</color>
+    <color name="glass_stroke">#3322D3FF</color>
+    <color name="neon">#22D3FF</color>
+    <color name="neon_deep">#0A84FF</color>
+    <color name="neon_soft">#8022D3FF</color>
+    <color name="text_primary">#EAFBFF</color>
+    <color name="text_secondary">#8FA9B8</color>
+    <color name="text_dim">#5C7482</color>
+    <color name="danger">#FF5C7A</color>
+    <color name="success">#38F5B0</color>
+</resources>

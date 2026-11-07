@@ -1,0 +1,13 @@
+*.iml
+.gradle/
+.kotlin/
+.idea/
+local.properties
+build/
+app/build/
+captures/
+.externalNativeBuild/
+.cxx/
+*.apk
+*.aab
+!ZeroVox-1.0.1-debug.apk

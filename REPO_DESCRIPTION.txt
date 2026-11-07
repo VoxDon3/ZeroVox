@@ -1,0 +1,3 @@
+Zero Vox — تطبيق أندرويد لاستعراض كتالوج ألعاب PS5 وPS4، ونقل الملفات إلى الجهاز عبر الشبكة المحلية، وإدارة قوائم CheatRunner.
+
+Zero Vox is an Android app for browsing a PS5/PS4 game catalogue, transferring files to the console over the local network, and managing CheatRunner cheats.
