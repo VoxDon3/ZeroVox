@@ -39,7 +39,7 @@
 
 ## التثبيت
 
-1. نزّل ملف APK من صفحة الإصدارات أو من رابط `ZeroVox-1.0.1-debug.apk`.
+1. نزّل ملف APK من [صفحة الإصدارات](https://github.com/VoxDon3/ZeroVox/releases/latest) أو من [الرابط المباشر](https://github.com/VoxDon3/ZeroVox/releases/download/v1.0.1/ZeroVox-1.0.1-debug.apk).
 2. اسمح بتثبيت التطبيقات من المصدر غير المعروف إذا طلب النظام ذلك.
 3. افتح Zero Vox، ثم أدخل عنوان PS5 ورمز الاقتران من الإعدادات.
 4. بعد الاقتران، افتح تبويب **Games** لتحميل الكتالوج.
@@ -54,7 +54,7 @@
 ## البناء من المصدر
 
 ```bash
-git clone <repository-url>
+git clone https://github.com/VoxDon3/ZeroVox.git
 cd ZeroVox
 ./gradlew assembleDebug
 ```
