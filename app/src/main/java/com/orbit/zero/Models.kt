@@ -27,7 +27,26 @@ data class GameOption(
     val sha256: String,
     val content: JSONObject,
 ) {
-    val phoneAvailable: Boolean get() = url.startsWith("http")
+    val password: String = content.optString("archivePassword", "")
+    val hasLink: Boolean get() = url.startsWith("http")
+
+    val directFile: Boolean get() = hasLink &&
+        (url.contains("archive.org", ignoreCase = true) ||
+            (DIRECT_EXT.containsMatchIn(url) && BLOCKED_HOSTS.none { url.contains(it, ignoreCase = true) }))
+
+    val phoneAvailable: Boolean get() = directFile
+
+    private companion object {
+        val DIRECT_EXT = Regex(
+            "\\.(pkg|ffpfsc|ffp|exfat|zip|rar|7z|bin|iso|tar|gz|001|002|003)(\\?|$|#)",
+            RegexOption.IGNORE_CASE
+        )
+        val BLOCKED_HOSTS = listOf(
+            "akirabox.", "vikingfile.", "vik1ngfile.", "datanodes.", "filekeeper.",
+            "datavaults.", "rootz.so", "1fichier.", "mediafire.", "buzzheavier.",
+            "fileditch", "link-vault.", "gofile.", "pixeldrain.", "mega.nz",
+        )
+    }
 }
 
 data class Game(
@@ -74,6 +93,7 @@ data class Job(
     val filename: String,
     val path: String,
     val packages: List<PackageInfo>,
+    val extractedPath: String = "",
 ) {
     val active: Boolean
         get() = status in setOf(

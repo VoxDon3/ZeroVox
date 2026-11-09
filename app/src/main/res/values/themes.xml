@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.Orbit" parent="android:style/Theme.Material.NoActionBar">
+    <style name="Theme.ZeroVox" parent="android:style/Theme.Material.NoActionBar">
         <item name="android:windowBackground">@color/bg_deep</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
@@ -11,7 +11,7 @@
         <item name="android:windowActionModeOverlay">true</item>
     </style>
 
-    <style name="Theme.Orbit.Light" parent="android:style/Theme.Material.Light.NoActionBar">
+    <style name="Theme.ZeroVox.Light" parent="android:style/Theme.Material.Light.NoActionBar">
         <item name="android:windowBackground">@color/bg_light</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>

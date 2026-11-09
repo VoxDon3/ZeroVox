@@ -43,7 +43,7 @@ class Ps5Client(private val prefs: Prefs) {
 
     private fun url(path: String) = prefs.baseUrl + path
 
-    private fun call(
+    internal fun call(
         method: String,
         path: String,
         body: JSONObject? = null,
@@ -76,6 +76,9 @@ class Ps5Client(private val prefs: Prefs) {
     fun pair(code: String): Resp =
         call("POST", "/api/v1/pair", JSONObject().put("code", code), auth = false)
 
+    /** التزاوج التلقائي عند أول استخدام (يُنجز فقط إذا لم يكن الجهاز مPairs مسبقاً). */
+    fun autoPair(): Resp = call("POST", "/api/v1/pair/auto", JSONObject(), auth = false)
+
     fun system(): Resp = call("GET", "/api/v1/system")
 
     fun storage(): Resp = call("GET", "/api/v1/storage")
@@ -93,11 +96,20 @@ class Ps5Client(private val prefs: Prefs) {
                 .put("packageId", packageId)
         )
 
-    fun startDownload(releaseId: String, storageId: String, delivery: String = "direct"): Resp =
+    fun startDownload(option: GameOption, storageId: String, delivery: String = "direct"): Resp =
         call(
             "POST", "/api/v1/downloads",
             JSONObject()
-                .put("releaseId", releaseId)
+                .put("releaseId", option.releaseId)
+                .put("title", option.title)
+                .put("titleId", option.titleId)
+                .put("format", option.format)
+                .put("url", option.url)
+                .put("filename", option.filename)
+                .put("size", option.sizeBytes)
+                .put("sha256", option.sha256)
+                .put("content", option.content)
+                .put("password", option.password)
                 .put("storageId", storageId)
                 .put("delivery", delivery)
         )
@@ -220,6 +232,7 @@ class Ps5Client(private val prefs: Prefs) {
                         filename = o.optString("filename"),
                         path = o.optString("path"),
                         packages = packages,
+                        extractedPath = o.optString("extractedPath"),
                     )
                 )
             }

@@ -7,8 +7,11 @@
     <string name="nav_console">콘솔</string>
     <string name="status_connected">PS5 연결됨</string>
     <string name="status_unpaired">연결 안 됨</string>
-    <string name="status_checking">PS5 확인 중…</string>
+    <string name="status_checking">확인 중…</string>
     <string name="status_offline">PS5 오프라인</string>
+    <string name="cannot_open_browser">브라우저를 열 수 없습니다</string>
+    <string name="storage_internal">내부 저장소</string>
+    <string name="choose_storage">PS5 저장소 선택</string>
 
     <string name="setup_title">휴대폰을 PS5에 연결하세요</string>
     <string name="setup_subtitle">휴대폰에 게임을 다운로드해 로컬 네트워크로 PlayStation에 보내거나, 콘솔의 다운로드 대기열을 직접 관리하세요.</string>
@@ -230,4 +233,32 @@
     <string name="cheats_launching">게임 실행 중…</string>
     <string name="cheats_launch_sent">실행 요청을 보냈습니다.</string>
     <string name="cheats_launch_failed">실행할 수 없습니다: %1$s</string>
+    <string name="send_to_ps5">PS5로 전송</string>
+    <string name="send_started">%1$s을(를) PS5로 전송 중</string>
+    <string name="sent_to_ps5">PS5로 전송됨: %1$s</string>
+    <string name="auto_install_started">PS5에서 자동 설치가 시작되었습니다: %1$s</string>
+    <string name="already_installed">PS5에 이미 설치됨: %1$s</string>
+    <string name="sent_install_manual">파일이 전송되었습니다. 압축 해제가 진행 중이면 설치 섹션에서 설치하세요.</string>
+    <string name="err_open_file">다운로드한 파일을 열 수 없습니다</string>
+    <string name="notif_installing">PS5에서 설치가 시작되었습니다</string>
+    <string name="transfer_started_phone">%1$s을(를) 휴대폰으로 다운로드 중</string>
+    <string name="saved_to">%1$s에 저장됨</string>
+    <string name="download_state_running">다운로드 중…</string>
+    <string name="download_state_complete">다운로드 완료</string>
+    <string name="download_state_failed">다운로드 실패</string>
+    <string name="downloaded_to">%1$s에 저장됨</string>
+    <string name="open_link">링크 열기</string>
+    <string name="open_in_browser">브라우저</string>
+    <string name="web_download_started">%1$s을(를) 휴대폰으로 다운로드 중</string>
+    <string name="web_download_failed">다운로드를 시작할 수 없습니다: %1$s</string>
+    <string name="job_saved_to">저장 위치: %1$s</string>
+    <string name="confirm_delete_title">게임 삭제</string>
+    <string name="confirm_delete_message">“%1$s”을(를) 삭제하시겠습니까?</string>
+    <string name="confirm_delete_confirm">삭제</string>
+    <string name="confirm_delete_cancel">취소</string>
+    <string name="deleted">삭제됨: %1$s</string>
+    <string name="phone_only_hint">휴대폰 다운로드는 페어링 없이 작동합니다. PS5를 페어링하면 대기열과 설치를 볼 수 있습니다.</string>
+    <string name="settings_auto_load_agent">시작 시 에이전트 자동 로드</string>
+    <string name="settings_auto_on">켜짐</string>
+    <string name="settings_auto_off">꺼짐</string>
 </resources>

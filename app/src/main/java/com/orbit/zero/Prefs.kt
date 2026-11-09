@@ -12,12 +12,14 @@ class Prefs(context: Context) {
                 .removePrefix("http://")
                 .removePrefix("https://")
                 .trimEnd('/')
-            sp.edit().putString("host", clean).apply()
+            sp.edit().putString("host", clean).putBoolean("hostConfigured", true).apply()
         }
 
-    var port: Int
-        get() = sp.getInt("port", 34177)
-        set(value) = sp.edit().putInt("port", value).apply()
+    var hostConfigured: Boolean
+        get() = sp.getBoolean("hostConfigured", false)
+        set(value) = sp.edit().putBoolean("hostConfigured", value).apply()
+
+    val port: Int = 33333
 
     var token: String
         get() = sp.getString("token", "") ?: ""
@@ -45,6 +47,21 @@ class Prefs(context: Context) {
 
     val baseUrl: String get() = "http://$host:$port"
     val paired: Boolean get() = token.length == 64
+
+    var autoLoadAgent: Boolean
+        get() = sp.getBoolean("autoLoadAgent", true)
+        set(value) = sp.edit().putBoolean("autoLoadAgent", value).apply()
+
+    var webDownloadIds: Set<String>
+        get() = sp.getStringSet("webDownloadIds", emptySet()) ?: emptySet()
+        set(value) = sp.edit().putStringSet("webDownloadIds", value).apply()
+
+    fun addWebDownloadId(id: Long) {
+        if (id < 0) return
+        val ids = webDownloadIds.toMutableSet()
+        ids.add(id.toString())
+        webDownloadIds = if (ids.size > 50) ids.toList().takeLast(50).toSet() else ids
+    }
 
     fun clearPairing() {
         sp.edit().remove("token").apply()

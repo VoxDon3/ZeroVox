@@ -302,10 +302,11 @@ fun Context.actionButton(text: String, primary: Boolean, onClick: () -> Unit): B
         setOnClickListener { onClick() }
     }
 
-fun Context.progressBar(): ProgressBar = ProgressBar(
+fun Context.progressBar(indeterminate: Boolean = false): ProgressBar = ProgressBar(
     this, null, android.R.attr.progressBarStyleHorizontal
 ).apply {
     max = 100
+    isIndeterminate = indeterminate
     progressTintList = ColorStateList.valueOf(Palette.neon)
     progressBackgroundTintList = ColorStateList.valueOf(Color.parseColor(Palette.progressTrack))
     layoutParams = LinearLayout.LayoutParams(

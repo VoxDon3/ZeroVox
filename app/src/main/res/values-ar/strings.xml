@@ -3,12 +3,15 @@
     <string name="app_name">Zero Vox</string>
 
     <string name="nav_catalog">الألعاب</string>
-    <string name="nav_downloads">النقل</string>
+    <string name="nav_downloads">الترانسفير</string>
     <string name="nav_console">الجهاز</string>
     <string name="status_connected">PS5 متصل</string>
     <string name="status_unpaired">غير مقترن</string>
-    <string name="status_checking">جارٍ التحقق من PS5…</string>
+    <string name="status_checking">جارٍ التحقق…</string>
     <string name="status_offline">PS5 غير متصل</string>
+    <string name="cannot_open_browser">تعذر فتح المتصفح</string>
+    <string name="storage_internal">التخزين الداخلي</string>
+    <string name="choose_storage">اختر مساحة التخزين على الجهاز</string>
 
     <string name="setup_title">اربط هاتفك بـ PS5</string>
     <string name="setup_subtitle">نزّل الألعاب على هاتفك وأرسلها إلى PlayStation عبر الشبكة المحلية، أو أدِر طابور التنزيل على الجهاز مباشرة.</string>
@@ -75,11 +78,13 @@
     <string name="transfer_in_progress">هناك نقل قيد التنفيذ بالفعل. انتظر انتهاءه أو ألغِه.</string>
     <string name="transfer_started">بدأ تنزيل %1$s على الهاتف ونقله إلى PS5</string>
 
-    <string name="downloads_title">النقل</string>
+    <string name="downloads_title">الترانسفير</string>
     <string name="phone_transfer">النقل من الهاتف</string>
     <string name="ps5_queue">طابور PS5</string>
     <string name="install_on_ps5">التثبيت على PS5</string>
     <string name="last_update_now">آخر تحديث: الآن</string>
+    <string name="storage_access_hint">اسمح بالوصول للملفات ليتمكن Zero Vox من عرض الألعاب المحفوظة في Download/ZeroVox على هذا الهاتف.</string>
+    <string name="storage_access_button">السماح بالوصول للملفات</string>
     <string name="no_phone_transfer">لا يوجد نقل من الهاتف الآن. اختر لعبة ثم اختر «الهاتف».</string>
     <string name="state_preparing">تحضير…</string>
     <string name="state_downloading">تنزيل وإرسال</string>
@@ -88,8 +93,8 @@
     <string name="state_complete">اكتمل النقل</string>
     <string name="state_error">خطأ</string>
     <string name="state_cancelled">أُلغي</string>
-    <string name="cancel_transfer">إلغاء النقل</string>
-    <string name="cancelling">جارٍ إلغاء النقل…</string>
+    <string name="cancel_transfer">إلغاء التنزيل</string>
+    <string name="cancelling">جارٍ إلغاء التنزيل…</string>
     <string name="queue_empty">طابور PS5 فارغ.</string>
     <string name="action_pause">إيقاف مؤقت</string>
     <string name="action_retry">إعادة المحاولة</string>
@@ -260,4 +265,32 @@
     <string name="cheats_launching">جارٍ تشغيل اللعبة…</string>
     <string name="cheats_launch_sent">أُرسل طلب التشغيل.</string>
     <string name="cheats_launch_failed">تعذر التشغيل: %1$s</string>
+    <string name="send_to_ps5">إرسال إلى PS5</string>
+    <string name="send_started">جارٍ إرسال %1$s إلى PS5</string>
+    <string name="sent_to_ps5">أُرسل إلى PS5: %1$s</string>
+    <string name="auto_install_started">بدأ التثبيت تلقائياً على PS5: %1$s</string>
+    <string name="already_installed">مثبّتة بالفعل على PS5: %1$s</string>
+    <string name="sent_install_manual">أُرسل الملف. إذا كان الاستخراج ما زال جارياً فثبّته من قسم التثبيتات.</string>
+    <string name="err_open_file">تعذّر فتح الملف المنزّل</string>
+    <string name="notif_installing">بدأ التثبيت على PS5</string>
+    <string name="transfer_started_phone">جارٍ تنزيل %1$s إلى الهاتف</string>
+    <string name="saved_to">حُفظ في %1$s</string>
+    <string name="download_state_running">جارٍ التنزيل…</string>
+    <string name="download_state_complete">تم التنزيل</string>
+    <string name="download_state_failed">فشل التنزيل</string>
+    <string name="downloaded_to">حُفظ في %1$s</string>
+    <string name="open_link">فتح الرابط</string>
+    <string name="open_in_browser">المتصفح</string>
+    <string name="web_download_started">جارٍ تنزيل %1$s إلى الهاتف</string>
+    <string name="web_download_failed">تعذّر بدء التنزيل: %1$s</string>
+    <string name="job_saved_to">حُفظ في: %1$s</string>
+    <string name="confirm_delete_title">حذف اللعبة</string>
+    <string name="confirm_delete_message">هل تريد حذف «%1$s»؟</string>
+    <string name="confirm_delete_confirm">حذف</string>
+    <string name="confirm_delete_cancel">إلغاء</string>
+    <string name="deleted">تم الحذف: %1$s</string>
+    <string name="phone_only_hint">تنزيل الهاتف يعمل دون اقتران. اقترن بـPS5 لعرض قائمته والتثبيتات.</string>
+    <string name="settings_auto_load_agent">تحميل الوكيل تلقائياً عند التشغيل</string>
+    <string name="settings_auto_on">تشغيل</string>
+    <string name="settings_auto_off">إيقاف</string>
 </resources>

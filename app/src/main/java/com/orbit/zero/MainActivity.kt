@@ -2,8 +2,8 @@ package com.orbit.zero
 
 import android.Manifest
 import android.annotation.SuppressLint
-import android.app.AlertDialog
 import android.app.Dialog
+import android.app.DownloadManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -16,6 +16,9 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.Environment
+import android.net.Uri
+import android.provider.Settings
 import android.text.Editable
 import android.text.TextUtils
 import android.text.TextWatcher
@@ -27,6 +30,7 @@ import android.view.WindowManager
 import android.widget.Button
 import android.widget.EditText
 import android.widget.FrameLayout
+import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ProgressBar
@@ -36,16 +40,23 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.core.widget.TextViewCompat
+import android.util.TypedValue
+
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import coil.load
 import org.json.JSONObject
 import java.util.concurrent.Executors
+import java.io.File
 
 class MainActivity : ComponentActivity() {
     companion object {
@@ -57,6 +68,11 @@ class MainActivity : ComponentActivity() {
     private lateinit var cheatApi: CheatRunnerClient
     private val io = Executors.newFixedThreadPool(4)
     private val main = Handler(Looper.getMainLooper())
+    private val webDownloadLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == android.app.Activity.RESULT_OK) {
+            setTab("downloads")
+        }
+    }
 
     private lateinit var content: FrameLayout
     private lateinit var navBar: LinearLayout
@@ -92,7 +108,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         val startupPrefs = getSharedPreferences("orbit_zero", MODE_PRIVATE)
-        setTheme(if (startupPrefs.getBoolean("lightTheme", false)) R.style.Theme_Orbit_Light else R.style.Theme_Orbit)
+        setTheme(if (startupPrefs.getBoolean("lightTheme", false)) R.style.Theme_ZeroVox_Light else R.style.Theme_ZeroVox)
         super.onCreate(savedInstanceState)
         prefs = Prefs(this)
         Palette.applyTheme(prefs.lightTheme)
@@ -101,6 +117,7 @@ class MainActivity : ComponentActivity() {
         cheatApi = CheatRunnerClient(prefs)
         WindowCompat.setDecorFitsSystemWindows(window, false)
         requestNotificationPermission()
+        ensureStorageAccess()
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 confirmExit()
@@ -118,6 +135,30 @@ class MainActivity : ComponentActivity() {
             else -> showCatalog()
         }
         loadCatalog(false)
+        bootstrapAgent()
+    }
+
+    private fun bootstrapAgent() {
+        if (!prefs.hostConfigured || !prefs.autoLoadAgent || prefs.paired) return
+        io.execute {
+            val host = prefs.host
+            val started = AgentLoader.ensureRunning(this@MainActivity, host)
+            runOnUiThread {
+                if (started && !prefs.paired) {
+                    val r = api.autoPair()
+                    runOnUiThread {
+                        if (r.ok) {
+                            val token = r.json()?.optString("token") ?: ""
+                            if (token.length == 64) {
+                                prefs.token = token
+                                refreshConnectionPill()
+                                loadStorage { setTab("catalog") }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     override fun onResume() {
@@ -156,14 +197,162 @@ class MainActivity : ComponentActivity() {
         dialog.window?.decorView?.layoutDirection = resources.configuration.layoutDirection
     }
 
+    private fun confirmDeleteJob(job: Job) {
+        val dialog = Dialog(this)
+        val col = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = glassDrawable(26)
+            setPadding(dpx(20), dpx(20), dpx(20), dpx(18))
+        }
+        col.addView(titleText(getString(R.string.confirm_delete_title), 20f))
+        col.addView(spacer(10))
+        col.addView(bodyText(getString(R.string.confirm_delete_message, job.title), 15f))
+        col.addView(spacer(18))
+        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        row.addView(actionButton(getString(R.string.confirm_delete_cancel), false) { dialog.dismiss() },
+            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        row.addView(View(this), LinearLayout.LayoutParams(dpx(10), 1))
+        row.addView(actionButton(getString(R.string.confirm_delete_confirm), true) {
+            dialog.dismiss()
+            runJobAction(job, "remove")
+            toast(getString(R.string.deleted, job.title))
+        }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        col.addView(row)
+
+        dialog.setContentView(col)
+        dialog.window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+        dialog.show()
+        dialog.window?.setLayout(
+            (resources.displayMetrics.widthPixels * 0.85f).toInt(),
+            WindowManager.LayoutParams.WRAP_CONTENT
+        )
+        dialog.window?.decorView?.layoutDirection = resources.configuration.layoutDirection
+    }
+
+    private fun confirmDeletePhone(d: PhoneDownload) {
+        val dialog = Dialog(this)
+        val col = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = glassDrawable(26)
+            setPadding(dpx(20), dpx(20), dpx(20), dpx(18))
+        }
+        col.addView(titleText(getString(R.string.confirm_delete_title), 20f))
+        col.addView(spacer(10))
+        col.addView(bodyText(getString(R.string.confirm_delete_message, d.filename), 15f))
+        col.addView(spacer(18))
+        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        row.addView(actionButton(getString(R.string.confirm_delete_cancel), false) { dialog.dismiss() },
+            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        row.addView(View(this), LinearLayout.LayoutParams(dpx(10), 1))
+        row.addView(actionButton(getString(R.string.confirm_delete_confirm), true) {
+            dialog.dismiss()
+            val uri = d.uri
+            when {
+                uri.startsWith("file://") -> {
+                    runCatching {
+                        val path = Uri.parse(uri).path
+                        if (!path.isNullOrBlank()) File(path).delete()
+                    }
+                }
+                uri.isNotBlank() -> {
+                    runCatching { contentResolver.delete(Uri.parse(uri), null, null) }
+                }
+                d.path.isNotBlank() -> {
+                    runCatching {
+                        val name = d.filename
+                        val dir = File(
+                            Environment.getExternalStoragePublicDirectory(
+                                Environment.DIRECTORY_DOWNLOADS
+                            ),
+                            "ZeroVox"
+                        )
+                        File(dir, name).delete()
+                    }
+                }
+            }
+            /* Purge the DownloadManager database record so a failed download
+             * disappears from the list instead of staying stuck. */
+            if (d.downloadId >= 0) {
+                runCatching {
+                    val dm = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+                    dm.remove(d.downloadId)
+                }
+            }
+            toast(getString(R.string.deleted, d.filename))
+            setTab("downloads")
+        }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        col.addView(row)
+
+        dialog.setContentView(col)
+        dialog.window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+        dialog.show()
+        dialog.window?.setLayout(
+            (resources.displayMetrics.widthPixels * 0.85f).toInt(),
+            WindowManager.LayoutParams.WRAP_CONTENT
+        )
+        dialog.window?.decorView?.layoutDirection = resources.configuration.layoutDirection
+    }
+
+    private fun confirmDeleteTransfer(t: TransferState) {
+        val dialog = Dialog(this)
+        val col = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = glassDrawable(26)
+            setPadding(dpx(20), dpx(20), dpx(20), dpx(18))
+        }
+        col.addView(titleText(getString(R.string.confirm_delete_title), 20f))
+        col.addView(spacer(10))
+        col.addView(
+            bodyText(getString(R.string.confirm_delete_message, t.title.ifBlank { t.filename }), 15f)
+        )
+        col.addView(spacer(18))
+        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        row.addView(actionButton(getString(R.string.confirm_delete_cancel), false) { dialog.dismiss() },
+            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        row.addView(View(this), LinearLayout.LayoutParams(dpx(10), 1))
+        row.addView(actionButton(getString(R.string.confirm_delete_confirm), true) {
+            dialog.dismiss()
+            val wasRunning = t.running
+            if (wasRunning) TransferStore.cancelRequested = true
+            if (!wasRunning) deleteDownloadedFile(t.uri, t.filename)
+            TransferStore.clear()
+            toast(getString(R.string.deleted, t.title.ifBlank { t.filename }))
+            setTab("downloads")
+        }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        col.addView(row)
+
+        dialog.setContentView(col)
+        dialog.window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+        dialog.show()
+        dialog.window?.setLayout(
+            (resources.displayMetrics.widthPixels * 0.85f).toInt(),
+            WindowManager.LayoutParams.WRAP_CONTENT
+        )
+        dialog.window?.decorView?.layoutDirection = resources.configuration.layoutDirection
+    }
+
+    private fun deleteDownloadedFile(uri: String, filename: String) {
+        when {
+            uri.startsWith("file://") -> runCatching {
+                val path = Uri.parse(uri).path
+                if (!path.isNullOrBlank()) File(path).delete()
+            }
+            uri.isNotBlank() -> runCatching { contentResolver.delete(Uri.parse(uri), null, null) }
+            filename.isNotBlank() -> runCatching {
+                val dir = File(
+                    Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+                    "ZeroVox"
+                )
+                File(dir, filename).delete()
+            }
+        }
+    }
+
     override fun onDestroy() {
         super.onDestroy()
         stopRefresh()
         io.shutdownNow()
     }
-
-    private fun portFrom(text: String): Int =
-        text.toIntOrNull()?.coerceIn(1, 65535) ?: 34177
 
     private fun statusDot(color: Int): GradientDrawable = GradientDrawable().apply {
         shape = GradientDrawable.OVAL
@@ -177,6 +366,35 @@ class MainActivity : ComponentActivity() {
         ) {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 9)
         }
+    }
+
+    private fun storageAccessGranted(): Boolean {
+        // Android 13+ needs no storage permission for the app's own files in
+        // Download/ZeroVox (they are accessed through MediaStore).
+        if (Build.VERSION.SDK_INT >= 33) return true
+        val read = checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE) ==
+            PackageManager.PERMISSION_GRANTED
+        if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
+            val write = checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) ==
+                PackageManager.PERMISSION_GRANTED
+            return read && write
+        }
+        return read
+    }
+
+    private fun ensureStorageAccess() {
+        if (storageAccessGranted()) return
+        // Ask with the normal runtime-permission dialog, exactly like the
+        // notification permission, instead of opening the settings screen.
+        val perms = if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
+            arrayOf(
+                Manifest.permission.READ_EXTERNAL_STORAGE,
+                Manifest.permission.WRITE_EXTERNAL_STORAGE
+            )
+        } else {
+            arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+        }
+        requestPermissions(perms, 10)
     }
 
     @SuppressLint("SetTextI18n")
@@ -238,8 +456,8 @@ class MainActivity : ComponentActivity() {
             setPadding(dpx(6), 0, 0, 0)
         }
         statusPill = TextView(this).apply {
-            textSize = 11f
-            setPadding(dpx(12), dpx(6), dpx(12), dpx(6))
+            textSize = 15f
+            setPadding(dpx(16), dpx(8), dpx(16), dpx(8))
             typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
             maxLines = 1
             isSingleLine = true
@@ -319,14 +537,22 @@ class MainActivity : ComponentActivity() {
         val item = TextView(this).apply {
             text = label
             gravity = Gravity.CENTER
-            textSize = 13f
+            textSize = 12f
+            maxLines = 1
+            isSingleLine = true
+            includeFontPadding = false
+            setPadding(dpx(2), 0, dpx(2), 0)
             typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-            setPadding(dpx(8), dpx(11), dpx(8), dpx(11))
             pressAnimation()
             setOnClickListener { setTab(key) }
         }
+        // Shrink to fit a single line; every cell has the same fixed height so
+        // no item (e.g. "الترانسفير") is taller or split across two lines.
+        TextViewCompat.setAutoSizeTextTypeUniformWithConfiguration(
+            item, 8, 12, 1, TypedValue.COMPLEX_UNIT_SP
+        )
         navItems[key] = item
-        navBar.addView(item, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        navBar.addView(item, LinearLayout.LayoutParams(0, dpx(46), 1f))
     }
 
     private fun setTab(key: String) {
@@ -391,14 +617,35 @@ class MainActivity : ComponentActivity() {
 
     private fun scrollContent(): LinearLayout {
         content.removeAllViews()
+        val swipe = SwipeRefreshLayout(this).apply {
+            setColorSchemeColors(Palette.neon)
+            setProgressBackgroundColorSchemeColor(0xFF0D1119.toInt())
+        }
         val scroll = ScrollView(this).apply { isFillViewport = true }
         val col = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dpx(20), dpx(6), dpx(20), dpx(28))
         }
         scroll.addView(col, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-        content.addView(scroll, FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)
+        swipe.addView(scroll, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+        content.addView(swipe, FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)
+        swipe.setOnRefreshListener {
+            swipe.postDelayed({
+                swipe.isRefreshing = false
+                refreshCurrentTab()
+            }, 350)
+        }
         return col
+    }
+
+    private fun refreshCurrentTab() {
+        when (tab) {
+            "catalog" -> loadCatalog(true)
+            "downloads" -> showDownloads()
+            "console" -> showConsole()
+            "cheats" -> showCheats()
+            else -> setTab(tab)
+        }
     }
 
     private fun toast(text: String) {
@@ -435,10 +682,6 @@ class MainActivity : ComponentActivity() {
         card.addView(host)
         card.addView(spacer(8))
 
-        val port = glassInput(getString(R.string.hint_port), numeric = true).apply {
-            setText(prefs.port.toString())
-        }
-        card.addView(port)
         card.addView(spacer(12))
 
         val code = codeInput()
@@ -455,7 +698,6 @@ class MainActivity : ComponentActivity() {
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         val showCode = actionButton(getString(R.string.setup_show_code), false) {
             prefs.host = host.text.toString().trim()
-            prefs.port = portFrom(port.text.toString())
             status.text = getString(R.string.setup_show_requested)
             io.execute {
                 val r = api.showPairingCode()
@@ -467,14 +709,12 @@ class MainActivity : ComponentActivity() {
         }
         val pair = actionButton(getString(R.string.pair_button), true) {
             val h = host.text.toString().trim()
-            val p = portFrom(port.text.toString())
             val c = code.text.toString().trim()
             if (h.isBlank() || c.length != 6) {
                 status.text = getString(R.string.pair_invalid)
                 return@actionButton
             }
             prefs.host = h
-            prefs.port = p
             status.text = getString(R.string.pairing)
             io.execute {
                 val r = api.pair(c)
@@ -506,34 +746,6 @@ class MainActivity : ComponentActivity() {
         help.addView(bodyText(getString(R.string.setup_tips_body)))
         col.addView(help)
         col.addView(spacer(16))
-
-        val catalogCard = softCard(16)
-        catalogCard.addView(accentText(getString(R.string.catalog_title)))
-        catalogCard.addView(spacer(4))
-        val catStatus = bodyText(
-            if (CatalogRepo.games.isEmpty()) getString(R.string.catalog_not_loaded)
-            else resources.getQuantityString(
-                R.plurals.catalog_games_ready,
-                CatalogRepo.games.size,
-                CatalogRepo.games.size,
-            )
-        )
-        catalogCard.addView(catStatus)
-        catalogCard.addView(spacer(10))
-        catalogCard.addView(actionButton(getString(R.string.catalog_refresh), false) {
-            catStatus.text = getString(R.string.refreshing)
-            io.execute {
-                val ok = CatalogRepo.load(this@MainActivity, true)
-                runOnUiThread {
-                    catStatus.text = if (ok) resources.getQuantityString(
-                        R.plurals.catalog_games_ready,
-                        CatalogRepo.games.size,
-                        CatalogRepo.games.size,
-                    ) else getString(R.string.catalog_refresh_failed, CatalogRepo.lastError ?: "")
-                }
-            }
-        })
-        col.addView(catalogCard)
     }
 
     // ---------------------------------------------------------------- catalog
@@ -565,16 +777,60 @@ class MainActivity : ComponentActivity() {
             })
         }
         root.addView(search)
-        root.addView(spacer(10))
+        root.addView(spacer(8))
 
-        if (!prefs.paired) {
-            val banner = softCard(14)
-            banner.addView(bodyText(getString(R.string.not_paired_banner)))
-            banner.addView(spacer(8))
-            banner.addView(actionButton(getString(R.string.pair_button), false) { showSetup() })
-            root.addView(banner)
-            root.addView(spacer(10))
+        val catalogRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
         }
+        val catalogChipViews = LinkedHashMap<String, TextView>()
+        fun styleCatalogChips() {
+            for ((id, tv) in catalogChipViews) {
+                val selected = id == CatalogRepo.currentCatalogId
+                tv.background = chipDrawable(selected)
+                tv.setTextColor(if (selected) Palette.neon else Palette.textSecondary)
+            }
+        }
+        for (c in CatalogRepo.catalogs) {
+            val tv = TextView(this).apply {
+                text = c.name
+                textSize = 12f
+                gravity = Gravity.CENTER
+                setPadding(dpx(14), dpx(7), dpx(14), dpx(7))
+                typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+                background = chipDrawable(c.id == CatalogRepo.currentCatalogId)
+                setTextColor(
+                    if (c.id == CatalogRepo.currentCatalogId) Palette.neon else Palette.textSecondary
+                )
+                pressAnimation()
+                setOnClickListener {
+                    if (CatalogRepo.currentCatalogId == c.id) return@setOnClickListener
+                    CatalogRepo.setCurrentCatalog(c.id)
+                    styleCatalogChips()
+                    loadCatalog(true)
+                }
+            }
+            catalogChipViews[c.id] = tv
+            catalogRow.addView(
+                tv,
+                LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).also { it.rightMargin = dpx(6) }
+            )
+        }
+        val catalogScroll = HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            addView(catalogRow)
+        }
+        root.addView(
+            catalogScroll,
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+        )
+        root.addView(spacer(8))
 
         val chips = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -609,11 +865,11 @@ class MainActivity : ComponentActivity() {
         chip("ps5", getString(R.string.download_ps5))
         chip("ps4", "PS4")
         root.addView(chips)
-        root.addView(spacer(10))
+        root.addView(spacer(6))
 
         catalogCount = bodyText("")
         root.addView(catalogCount)
-        root.addView(spacer(8))
+        root.addView(spacer(6))
 
         val list = RecyclerView(this).apply {
             layoutManager = LinearLayoutManager(this@MainActivity)
@@ -647,7 +903,19 @@ class MainActivity : ComponentActivity() {
             }
         )
 
-        content.addView(root, FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)
+        val swipe = SwipeRefreshLayout(this).apply {
+            setColorSchemeColors(Palette.neon)
+            setProgressBackgroundColorSchemeColor(0xFF0D1119.toInt())
+            addView(root, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+            setOnChildScrollUpCallback { _, _ -> list.canScrollVertically(-1) }
+            setOnRefreshListener {
+                postDelayed({
+                    isRefreshing = false
+                    loadCatalog(true)
+                }, 350)
+            }
+        }
+        content.addView(swipe, FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)
         applyCatalogFilter()
     }
 
@@ -682,7 +950,7 @@ class MainActivity : ComponentActivity() {
         catalogLoading = true
         if (tab == "catalog") applyCatalogFilter()
         io.execute {
-            CatalogRepo.load(this@MainActivity, force)
+            CatalogRepo.load(this@MainActivity, force, CatalogRepo.currentCatalogId)
             runOnUiThread {
                 catalogLoading = false
                 if (tab == "catalog") applyCatalogFilter()
@@ -726,7 +994,7 @@ class MainActivity : ComponentActivity() {
             val card = softCard(14)
             val title = "${option.format} · ${option.provider.ifBlank { option.source }}"
             card.addView(titleText(title, 15f))
-            card.addView(bodyText("${Ps5Client.formatBytes(option.sizeBytes)} · ${option.filename}"))
+            card.addView(bodyText("${sizeLabel(option.sizeBytes)} · ${option.filename}"))
             card.addView(spacer(8))
             val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
             val ps5 = actionButton(getString(R.string.download_ps5), true) {
@@ -736,23 +1004,14 @@ class MainActivity : ComponentActivity() {
                     showSetup()
                     return@actionButton
                 }
-                chooseStorage(getString(R.string.download_to_ps5)) { storage ->
-                    startConsoleDownload(option, storage)
-                }
+                openWebForDownload(option, "ps5")
             }
             val phone = actionButton(getString(R.string.phone), false) {
                 dialog.dismiss()
-                if (!prefs.paired) {
-                    toast(getString(R.string.pair_required))
-                    showSetup()
-                    return@actionButton
-                }
-                chooseStorage(getString(R.string.download_to_phone)) { storage ->
-                    startPhoneTransfer(option, storage)
-                }
+                openWebForDownload(option, "phone")
             }
-            phone.isEnabled = option.phoneAvailable
-            phone.alpha = if (option.phoneAvailable) 1f else 0.4f
+            phone.isEnabled = option.hasLink
+            phone.alpha = if (option.hasLink) 1f else 0.4f
             row.addView(ps5, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
             row.addView(View(this), LinearLayout.LayoutParams(dpx(8), 1))
             row.addView(phone, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
@@ -798,14 +1057,49 @@ class MainActivity : ComponentActivity() {
                     onPick(list[0])
                     return@runOnUiThread
                 }
-                val labels = list.map {
-                    getString(R.string.storage_item, it.label, Ps5Client.formatBytes(it.freeBytes))
-                }.toTypedArray()
-                val dialog = AlertDialog.Builder(this)
-                    .setTitle(title)
-                    .setItems(labels) { _, which -> onPick(list[which]) }
-                    .setNegativeButton(getString(R.string.cancel), null)
-                    .show()
+                val dialog = Dialog(this)
+                dialog.window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+                val col = LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    background = glassDrawable(26)
+                    setPadding(dpx(20), dpx(20), dpx(20), dpx(18))
+                }
+                col.addView(titleText(title, 20f))
+                col.addView(spacer(12))
+                for (storage in list) {
+                    col.addView(
+                        actionButton(
+                            getString(
+                                R.string.storage_item,
+                                storage.label,
+                                Ps5Client.formatBytes(storage.freeBytes)
+                            ),
+                            storage.id == prefs.storageId
+                        ) {
+                            dialog.dismiss()
+                            onPick(storage)
+                        },
+                        LinearLayout.LayoutParams(
+                            LinearLayout.LayoutParams.MATCH_PARENT,
+                            LinearLayout.LayoutParams.WRAP_CONTENT
+                        )
+                    )
+                    col.addView(spacer(8))
+                }
+                col.addView(spacer(4))
+                col.addView(
+                    actionButton(getString(R.string.cancel), false) { dialog.dismiss() },
+                    LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT
+                    )
+                )
+                dialog.setContentView(col)
+                dialog.show()
+                dialog.window?.setLayout(
+                    (resources.displayMetrics.widthPixels * 0.9f).toInt(),
+                    WindowManager.LayoutParams.WRAP_CONTENT
+                )
                 dialog.window?.decorView?.layoutDirection = resources.configuration.layoutDirection
             }
         }
@@ -813,7 +1107,7 @@ class MainActivity : ComponentActivity() {
 
     private fun startConsoleDownload(option: GameOption, storage: Storage) {
         io.execute {
-            val r = api.startDownload(option.releaseId, storage.id)
+            val r = api.startDownload(option, storage.id)
             runOnUiThread {
                 if (r.ok) {
                     toast(getString(R.string.added_to_queue))
@@ -823,6 +1117,73 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    private fun openWebForDownload(option: GameOption, mode: String) {
+        val url = option.browserUrl.ifBlank { option.url }
+        if (url.isBlank()) {
+            toast(getString(R.string.browser_required))
+            return
+        }
+        val intent = Intent(this, DownloadWebActivity::class.java).apply {
+            putExtra("url", url)
+            putExtra("title", option.title)
+            putExtra("mode", mode)
+            putExtra("filename", option.filename)
+            putExtra("size", option.sizeBytes)
+        }
+        webDownloadLauncher.launch(intent)
+    }
+
+    private fun storageIdFor(mode: String): String {
+        return if (mode == "ps5") prefs.storageId else "phone"
+    }
+
+    private fun startSendToPs5(d: PhoneDownload, storage: Storage) {
+        if (!prefs.paired) {
+            toast(getString(R.string.pair_required))
+            showSetup()
+            return
+        }
+        if (d.uri.isBlank()) return
+        val intent = Intent(this, TransferService::class.java).apply {
+            putExtra("mode", "send")
+            putExtra("title", d.filename)
+            putExtra("uri", d.uri)
+            putExtra("filename", d.filename)
+            putExtra("size", d.size)
+            putExtra("storageId", storage.id)
+        }
+        ContextCompat.startForegroundService(this, intent)
+        toast(getString(R.string.send_started, d.filename))
+        setTab("downloads")
+    }
+
+    private fun startSendToPs5FromTransfer(t: TransferState) {
+        if (!prefs.paired) {
+            toast(getString(R.string.pair_required))
+            showSetup("downloads")
+            return
+        }
+        if (t.uri.isBlank()) {
+            toast(getString(R.string.storage_error))
+            return
+        }
+        if (TransferStore.current.running) {
+            toast(getString(R.string.transfer_in_progress))
+            return
+        }
+        val intent = Intent(this, TransferService::class.java).apply {
+            putExtra("mode", "send")
+            putExtra("title", t.title)
+            putExtra("uri", t.uri)
+            putExtra("filename", t.filename)
+            putExtra("size", t.total)
+            putExtra("storageId", prefs.storageId)
+        }
+        ContextCompat.startForegroundService(this, intent)
+        toast(getString(R.string.send_started, t.filename))
+        setTab("downloads")
     }
 
     private fun startPhoneTransfer(option: GameOption, storage: Storage) {
@@ -848,6 +1209,66 @@ class MainActivity : ComponentActivity() {
         setTab("downloads")
     }
 
+    private fun startPhoneDownload(option: GameOption) {
+        if (TransferStore.current.running) {
+            toast(getString(R.string.transfer_in_progress))
+            setTab("downloads")
+            return
+        }
+        val intent = Intent(this, TransferService::class.java).apply {
+            putExtra("mode", "local")
+            putExtra("title", option.title)
+            putExtra("url", option.url)
+            putExtra("filename", fileNameFor(option))
+            putExtra("size", option.sizeBytes)
+            putExtra("sha256", option.sha256)
+        }
+        ContextCompat.startForegroundService(this, intent)
+        toast(getString(R.string.transfer_started_phone, option.title))
+        setTab("downloads")
+    }
+
+    private fun startDownloadWeb(option: GameOption) {
+        val url = option.browserUrl.ifBlank { option.url }
+        if (url.isBlank()) {
+            toast(getString(R.string.browser_required))
+            return
+        }
+        val intent = Intent(this, DownloadWebActivity::class.java).apply {
+            putExtra("title", option.title)
+            putExtra("url", url)
+        }
+        webDownloadLauncher.launch(intent)
+    }
+
+    private fun sizeLabel(bytes: Long): String =
+        if (bytes > 0) Ps5Client.formatBytes(bytes) else "—"
+
+    private fun fileNameFor(option: GameOption): String {
+        val fromUrl = option.url
+            .substringBefore('?')
+            .substringBefore('#')
+            .substringAfterLast('/')
+        return when {
+            option.filename.contains('.') -> option.filename
+            fromUrl.contains('.') -> fromUrl
+            option.filename.isNotBlank() -> option.filename
+            else -> option.titleId
+        }
+    }
+
+    private fun openBrowser(url: String) {
+        if (url.isBlank()) {
+            toast(getString(R.string.browser_required))
+            return
+        }
+        runCatching {
+            startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url)))
+        }.onFailure {
+            toast(getString(R.string.browser_required))
+        }
+    }
+
     // -------------------------------------------------------------- downloads
 
     private fun showDownloads() {
@@ -862,42 +1283,30 @@ class MainActivity : ComponentActivity() {
         col.addView(titleText(getString(R.string.downloads_title), 24f))
         col.addView(spacer(10))
 
+        if (!storageAccessGranted()) {
+            val perm = softCard(14)
+            perm.addView(bodyText(getString(R.string.storage_access_hint), 13f))
+            perm.addView(spacer(8))
+            perm.addView(
+                actionButton(getString(R.string.storage_access_button), true) {
+                    ensureStorageAccess()
+                }
+            )
+            col.addView(perm)
+            col.addView(spacer(10))
+        }
+
+        val local = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        col.addView(local)
+        renderLocal(local)
+
         if (!prefs.paired) {
-            val card = glassCard(18)
-            card.addView(bodyText(getString(R.string.not_paired_banner)).apply {
-                setTextColor(Palette.textSecondary)
-            })
-            card.addView(spacer(12))
-            card.addView(actionButton(getString(R.string.pair_now), true) {
-                showSetup("downloads")
-            })
-            card.addView(spacer(8))
-            card.addView(actionButton(getString(R.string.browse_catalog), false) {
-                showCatalog()
-            })
-            col.addView(card)
-            col.addView(spacer(16))
-            addLockedSection(col, getString(R.string.phone_transfer), getString(R.string.transfers_locked))
-            col.addView(hairline())
-            addLockedSection(col, getString(R.string.ps5_queue), getString(R.string.queue_locked))
-            col.addView(hairline())
-            addLockedSection(col, getString(R.string.install_on_ps5), getString(R.string.installs_locked))
+            startRefresh { if (tab == "downloads") renderLocal(local) }
             return
         }
 
-        col.addView(accentText(getString(R.string.phone_transfer)))
-        val local = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        col.addView(local)
-        col.addView(hairline())
-        col.addView(accentText(getString(R.string.ps5_queue)))
-        val queue = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        col.addView(queue)
-        col.addView(hairline())
-        col.addView(accentText(getString(R.string.install_on_ps5)))
-        val installs = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        col.addView(installs)
-        val note = bodyText("").apply { setTextColor(Palette.textDim) }
-        col.addView(note)
+        val ps5Section = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        col.addView(ps5Section)
 
         fun refresh() {
             if (tab != "downloads") return
@@ -909,10 +1318,25 @@ class MainActivity : ComponentActivity() {
                     val receipts = Ps5Client.parseReceipts(api.installations())
                     runOnUiThread {
                         refreshing = false
-                        if (tab == "downloads") {
+                        if (tab != "downloads") return@runOnUiThread
+                        ps5Section.removeAllViews()
+                        if (jobs.isNotEmpty()) {
+                            ps5Section.addView(hairline())
+                            ps5Section.addView(accentText(getString(R.string.ps5_queue)))
+                            val queue = LinearLayout(this@MainActivity).apply {
+                                orientation = LinearLayout.VERTICAL
+                            }
+                            ps5Section.addView(queue)
                             renderJobs(queue, jobs)
+                        }
+                        if (receipts.any { it.packages.isNotEmpty() }) {
+                            ps5Section.addView(hairline())
+                            ps5Section.addView(accentText(getString(R.string.install_on_ps5)))
+                            val installs = LinearLayout(this@MainActivity).apply {
+                                orientation = LinearLayout.VERTICAL
+                            }
+                            ps5Section.addView(installs)
                             renderReceipts(installs, receipts)
-                            note.text = getString(R.string.last_update_now)
                         }
                     }
                 }
@@ -933,12 +1357,205 @@ class MainActivity : ComponentActivity() {
     private fun renderLocal(container: LinearLayout) {
         container.removeAllViews()
         val t = TransferStore.current
-        if (t.state == "idle") {
-            container.addView(bodyText(getString(R.string.no_phone_transfer)))
-            return
+        val showTransfer = when {
+            t.state == "idle" -> false
+            t.running -> true
+            t.state == "complete" && t.uri.isNotBlank() ->
+                PhoneDownloads.exists(this, t.uri, t.filename)
+            else -> true
         }
-        val card = softCard(14)
-        card.addView(titleText(t.title.ifBlank { t.filename }, 15f))
+        if (showTransfer) {
+            addTransferCard(container, t)
+        }
+        for (d in PhoneDownloads.query(this)) {
+            if (showTransfer && d.filename == t.filename) continue
+            addPhoneCard(container, d)
+        }
+    }
+
+    private fun findCatalogGame(title: String, titleId: String, filename: String): Game? {
+        val games = CatalogRepo.games
+        if (games.isEmpty()) return null
+        val ids = LinkedHashSet<String>()
+        if (titleId.isNotBlank()) ids.add(titleId.uppercase())
+        Regex("(CUSA|PPSA)\\d{5}", RegexOption.IGNORE_CASE)
+            .find(filename)?.value?.let { ids.add(it.uppercase()) }
+        for (id in ids) games.firstOrNull { it.titleId.equals(id, true) }?.let { return it }
+        val t = title.ifBlank { filename.substringBeforeLast('.') }.trim().lowercase()
+        val fn = filename.lowercase()
+        if (t.isNotBlank()) {
+            games.firstOrNull { it.title.lowercase() == t }?.let { return it }
+            games.firstOrNull { g ->
+                val gt = g.title.lowercase()
+                gt.isNotBlank() && (t.contains(gt) || gt.contains(t))
+            }?.let { return it }
+        }
+        return games.firstOrNull { g -> g.gameId.isNotBlank() && fn.contains(g.gameId.lowercase()) }
+    }
+
+    private fun gameCover(url: String?, width: Int, height: Int): ImageView {
+        return ImageView(this).apply {
+            scaleType = ImageView.ScaleType.CENTER_CROP
+            clipToOutline = true
+            background = glassDrawable(10, Palette.coverTop, Palette.coverBottom, mid = Palette.coverMid)
+            if (!url.isNullOrBlank() && url.startsWith("http")) load(url) { crossfade(true) }
+            layoutParams = LinearLayout.LayoutParams(dpx(width), dpx(height))
+        }
+    }
+
+    private fun compactDelete(onClick: () -> Unit): Button = Button(this).apply {
+        text = "✕"
+        setTextColor(Palette.danger)
+        textSize = 15f
+        isAllCaps = false
+        minWidth = dpx(34)
+        minimumWidth = dpx(34)
+        minHeight = dpx(32)
+        minimumHeight = dpx(32)
+        setPadding(dpx(6), 0, dpx(6), 0)
+        background = GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = dpx(16).toFloat()
+            setColor(0x22FF5C7A)
+            setStroke(dpx(1).coerceAtLeast(1), 0x88FF5C7A.toInt())
+        }
+        includeFontPadding = false
+        stateListAnimator = null
+        pressAnimation()
+        setOnClickListener { onClick() }
+    }
+
+    private fun addPhoneCard(container: LinearLayout, d: PhoneDownload) {
+        val game = findCatalogGame("", "", d.filename)
+        val card = softCard(10)
+        card.layoutParams = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+        ).also { it.bottomMargin = dpx(8) }
+
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val cover = gameCover(game?.cover, 52, 68)
+        (cover.layoutParams as LinearLayout.LayoutParams).marginEnd = dpx(10)
+        row.addView(cover)
+
+        val body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val top = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        top.addView(
+            titleText(d.filename, 14f).apply {
+                maxLines = 1
+                ellipsize = TextUtils.TruncateAt.END
+            },
+            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        )
+        top.addView(compactDelete { confirmDeletePhone(d) })
+        body.addView(top)
+
+        val format = d.filename.substringAfterLast('.', "").uppercase()
+        val titleId = Regex("(CUSA|PPSA)\\d{5}", RegexOption.IGNORE_CASE)
+            .find(d.filename)?.value?.uppercase()
+        val stateLabel = when (d.state) {
+            "complete" -> getString(R.string.download_state_complete)
+            "failed" -> getString(R.string.download_state_failed)
+            else -> getString(R.string.download_state_running)
+        }
+        val meta = buildString {
+            if (format.isNotBlank()) append(format)
+            if (d.size > 0) {
+                if (isNotEmpty()) append(" · ")
+                append(Ps5Client.formatBytes(d.size))
+            }
+            if (!titleId.isNullOrBlank()) {
+                if (isNotEmpty()) append(" · ")
+                append(titleId)
+            }
+            if (isNotEmpty()) append(" · ")
+            append(stateLabel)
+        }
+        body.addView(bodyText(meta, 11f).apply {
+            setTextColor(if (d.state == "failed") Palette.danger else Palette.textSecondary)
+        })
+
+        val known = d.size > 0
+        if (d.running) {
+            body.addView(progressBar(indeterminate = !known).apply {
+                if (known) progress = d.percent
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, dpx(5)
+                ).also { it.topMargin = dpx(6) }
+            })
+            body.addView(bodyText(
+                if (known) {
+                    "${Ps5Client.formatBytes(d.received)} / ${Ps5Client.formatBytes(d.size)} · ${d.percent}%"
+                } else {
+                    Ps5Client.formatBytes(d.received) + " …"
+                },
+                11f
+            ))
+        }
+        if (d.state == "failed" && d.message.isNotBlank()) {
+            body.addView(bodyText(d.message, 11f).apply { setTextColor(Palette.danger) })
+        }
+        if (d.state == "complete" && d.uri.isNotBlank()) {
+            body.addView(accentText(getString(R.string.send_to_ps5), 11f).apply {
+                setPadding(0, dpx(4), 0, 0)
+                pressAnimation()
+                setOnClickListener {
+                    if (!prefs.paired) {
+                        toast(getString(R.string.pair_required))
+                        showSetup()
+                        return@setOnClickListener
+                    }
+                    if (TransferStore.current.running) {
+                        toast(getString(R.string.transfer_in_progress))
+                        setTab("downloads")
+                        return@setOnClickListener
+                    }
+                    chooseStorage(getString(R.string.send_to_ps5)) { storage ->
+                        startSendToPs5(d, storage)
+                    }
+                }
+            })
+        }
+
+        row.addView(body, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        card.addView(row)
+        container.addView(card)
+    }
+
+    private fun addTransferCard(container: LinearLayout, t: TransferState) {
+        val game = findCatalogGame(t.title, "", t.filename)
+        val card = softCard(10)
+        card.layoutParams = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+        ).also { it.bottomMargin = dpx(8) }
+
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val cover = gameCover(game?.cover, 52, 68)
+        (cover.layoutParams as LinearLayout.LayoutParams).marginEnd = dpx(10)
+        row.addView(cover)
+
+        val body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val top = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        top.addView(
+            titleText(t.title.ifBlank { t.filename }, 14f).apply {
+                maxLines = 1
+                ellipsize = TextUtils.TruncateAt.END
+            },
+            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        )
+        top.addView(compactDelete { confirmDeleteTransfer(t) })
+        body.addView(top)
         val stateLabel = when (t.state) {
             "preparing" -> getString(R.string.state_preparing)
             "downloading" -> getString(R.string.state_downloading)
@@ -949,35 +1566,70 @@ class MainActivity : ComponentActivity() {
             "cancelled" -> getString(R.string.state_cancelled)
             else -> t.state
         }
-        card.addView(bodyText(stateLabel))
+        body.addView(bodyText(stateLabel, 11f).apply {
+            setTextColor(if (t.state == "error") Palette.danger else Palette.textSecondary)
+        })
         if (t.total > 0) {
-            card.addView(progressBar().apply { progress = t.percent })
-            card.addView(
-                bodyText(
-                    "${Ps5Client.formatBytes(t.received)} / ${Ps5Client.formatBytes(t.total)}" +
-                        if (t.speed > 0) " · ${Ps5Client.formatBytes(t.speed.toLong())}/s" else ""
-                )
-            )
+            body.addView(progressBar().apply {
+                progress = t.percent
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, dpx(5)
+                ).also { it.topMargin = dpx(6) }
+            })
+            body.addView(bodyText(
+                "${Ps5Client.formatBytes(t.received)} / ${Ps5Client.formatBytes(t.total)} · ${t.percent}%" +
+                    if (t.speed > 0) " · ${Ps5Client.formatBytes(t.speed.toLong())}/s" else "",
+                11f
+            ))
+        } else if (t.running) {
+            body.addView(progressBar(indeterminate = true).apply {
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, dpx(5)
+                ).also { it.topMargin = dpx(6) }
+            })
+            body.addView(bodyText(
+                Ps5Client.formatBytes(t.received) +
+                    if (t.speed > 0) " · ${Ps5Client.formatBytes(t.speed.toLong())}/s" else "",
+                11f
+            ))
         }
-        when {
-            t.state == "error" && t.message.isNotBlank() ->
-                card.addView(bodyText(getString(R.string.error_detail, t.message)).apply {
-                    setTextColor(Palette.danger)
-                })
-            t.state == "sent" ->
-                card.addView(bodyText(getString(R.string.transfer_sent_note)).apply {
+        if (t.state == "error" && t.message.isNotBlank()) {
+            body.addView(bodyText(getString(R.string.error_detail, t.message), 11f).apply {
+                setTextColor(Palette.danger)
+            })
+        } else if (t.state == "sent") {
+            body.addView(bodyText(getString(R.string.transfer_sent_note), 11f).apply {
+                setTextColor(Palette.textDim)
+            })
+        } else if (t.state == "complete") {
+            val where = t.path.ifBlank { t.message }
+            if (where.isNotBlank()) {
+                body.addView(bodyText(where, 11f).apply {
                     setTextColor(Palette.textDim)
+                    maxLines = 2
+                    ellipsize = TextUtils.TruncateAt.MIDDLE
                 })
-            t.message.isNotBlank() ->
-                card.addView(bodyText(t.message).apply { setTextColor(Palette.textDim) })
+            }
+        } else if (!t.running && t.message.isNotBlank()) {
+            body.addView(bodyText(t.message, 11f).apply { setTextColor(Palette.textDim) })
         }
         if (t.running) {
-            card.addView(spacer(8))
-            card.addView(actionButton(getString(R.string.cancel_transfer), false) {
+            body.addView(actionButton(getString(R.string.cancel_transfer), false) {
                 TransferStore.cancelRequested = true
                 toast(getString(R.string.cancelling))
-            })
+            }, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+            ).also { it.topMargin = dpx(8) })
+        } else if (t.state == "complete" && t.uri.isNotBlank()) {
+            body.addView(actionButton(getString(R.string.send_to_ps5), true) {
+                startSendToPs5FromTransfer(t)
+            }, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+            ).also { it.topMargin = dpx(8) })
         }
+
+        row.addView(body, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        card.addView(row)
         container.addView(card)
     }
 
@@ -988,29 +1640,86 @@ class MainActivity : ComponentActivity() {
             return
         }
         for (job in jobs) {
-            val card = softCard(14)
-            card.addView(titleText(job.title, 15f))
-            card.addView(
+            val game = findCatalogGame(job.title, job.titleId, job.filename)
+            val card = softCard(10)
+            card.layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+            ).also { it.bottomMargin = dpx(8) }
+
+            val outer = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            val cover = gameCover(game?.cover, 52, 68)
+            (cover.layoutParams as LinearLayout.LayoutParams).marginEnd = dpx(10)
+            outer.addView(cover)
+
+            val body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            val header = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            header.addView(
+                titleText(job.title, 14f).apply {
+                    maxLines = 1
+                    ellipsize = TextUtils.TruncateAt.END
+                },
+                LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            )
+            header.addView(compactDelete { confirmDeleteJob(job) })
+            body.addView(header)
+            body.addView(
                 bodyText(
                     "${Ps5Client.statusLabel(this, job.status)} · ${job.format}" +
-                        if (job.titleId.isNotBlank()) " · ${job.titleId}" else ""
+                        if (job.titleId.isNotBlank()) " · ${job.titleId}" else "",
+                    11f
                 ).apply {
                     setTextColor(if (job.status == "error") Palette.danger else Palette.textSecondary)
                 }
             )
             if (job.total > 0) {
-                card.addView(progressBar().apply { progress = job.percent })
-                card.addView(
+                body.addView(progressBar().apply {
+                    progress = job.percent
+                    layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT, dpx(5)
+                    ).also { it.topMargin = dpx(6) }
+                })
+                body.addView(
                     bodyText(
-                        "${Ps5Client.formatBytes(job.received)} / ${Ps5Client.formatBytes(job.total)}" +
-                            if (job.speed > 0) " · ${Ps5Client.formatBytes(job.speed.toLong())}/s" else ""
+                        "${Ps5Client.formatBytes(job.received)} / ${Ps5Client.formatBytes(job.total)} · ${job.percent}%" +
+                            if (job.speed > 0) " · ${Ps5Client.formatBytes(job.speed.toLong())}/s" else "",
+                        11f
+                    )
+                )
+            } else if (job.active) {
+                body.addView(progressBar(indeterminate = true).apply {
+                    layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT, dpx(5)
+                    ).also { it.topMargin = dpx(6) }
+                })
+                body.addView(
+                    bodyText(
+                        Ps5Client.formatBytes(job.received) +
+                            if (job.speed > 0) " · ${Ps5Client.formatBytes(job.speed.toLong())}/s" else "",
+                        11f
                     )
                 )
             }
             if (job.error.isNotBlank()) {
-                card.addView(bodyText(job.error).apply { setTextColor(Palette.danger) })
+                body.addView(bodyText(job.error, 11f).apply { setTextColor(Palette.danger) })
             }
-            card.addView(spacer(8))
+            if (job.extractedPath.isNotBlank()) {
+                body.addView(
+                    bodyText(getString(R.string.job_saved_to, job.extractedPath), 11f).apply {
+                        maxLines = 1
+                        ellipsize = TextUtils.TruncateAt.END
+                        setTextColor(Palette.textSecondary)
+                    }
+                )
+            }
+            outer.addView(body, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            card.addView(outer)
+            card.addView(spacer(6))
 
             val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
             fun addAction(label: String, primary: Boolean, action: String) {
@@ -1039,7 +1748,6 @@ class MainActivity : ComponentActivity() {
             }
             if (actions.childCount > 0) card.addView(actions)
             container.addView(card)
-            container.addView(spacer(10))
         }
     }
 
@@ -1062,8 +1770,11 @@ class MainActivity : ComponentActivity() {
             return
         }
         for (receipt in withPackages) {
-            val card = softCard(14)
-            card.addView(titleText(receipt.title.ifBlank { getString(R.string.ps5_package) }, 15f))
+            val card = softCard(10)
+            card.layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+            ).also { it.bottomMargin = dpx(8) }
+            card.addView(titleText(receipt.title.ifBlank { getString(R.string.ps5_package) }, 14f))
             if (receipt.message.isNotBlank()) {
                 card.addView(bodyText(receipt.message).apply { setTextColor(Palette.textDim) })
             }
@@ -1092,7 +1803,6 @@ class MainActivity : ComponentActivity() {
                 card.addView(row)
             }
             container.addView(card)
-            container.addView(spacer(10))
         }
     }
 
@@ -1218,6 +1928,21 @@ class MainActivity : ComponentActivity() {
         ))
         col.addView(hapticRow)
         col.addView(spacer(18))
+        val autoRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        autoRow.addView(accentText(getString(R.string.settings_auto_load_agent)))
+        var autoBtn: Button? = null
+        autoBtn = actionButton(
+            getString(if (prefs.autoLoadAgent) R.string.settings_auto_on else R.string.settings_auto_off),
+            prefs.autoLoadAgent
+        ) {
+            prefs.autoLoadAgent = !prefs.autoLoadAgent
+            autoBtn?.text = getString(
+                if (prefs.autoLoadAgent) R.string.settings_auto_on else R.string.settings_auto_off
+            )
+        }
+        autoRow.addView(autoBtn, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        col.addView(autoRow)
+        col.addView(spacer(18))
         col.addView(actionButton(getString(R.string.close), false) { dialog.dismiss() })
 
         dialog.setContentView(scroll)
@@ -1323,43 +2048,6 @@ class MainActivity : ComponentActivity() {
         }
         col.addView(storageCard)
         col.addView(spacer(14))
-
-        val catCard = glassCard(16)
-        catCard.addView(accentText(getString(R.string.catalog_title)))
-        val catText = bodyText(resources.getQuantityString(
-            R.plurals.catalog_summary,
-            CatalogRepo.games.size,
-            CatalogRepo.games.size,
-            CatalogRepo.revision,
-        ))
-        catCard.addView(catText)
-        catCard.addView(spacer(10))
-        catCard.addView(actionButton(getString(R.string.catalog_refresh), false) {
-            catText.text = getString(R.string.refreshing)
-            io.execute {
-                val ok = CatalogRepo.load(this@MainActivity, true)
-                runOnUiThread {
-                    catText.text = if (ok) resources.getQuantityString(
-                        R.plurals.catalog_summary,
-                        CatalogRepo.games.size,
-                        CatalogRepo.games.size,
-                        CatalogRepo.revision,
-                    ) else getString(R.string.load_failed_short, CatalogRepo.lastError ?: "")
-                }
-            }
-        })
-        col.addView(catCard)
-        col.addView(spacer(14))
-
-        val about = softCard(16)
-        about.addView(accentText(getString(R.string.about_title)))
-        about.addView(spacer(6))
-        about.addView(bodyText(getString(R.string.about_body)))
-        col.addView(about)
-        col.addView(spacer(10))
-        col.addView(bodyText(getString(R.string.version, BuildConfig.VERSION_NAME)).apply {
-            setTextColor(Palette.textDim)
-        })
 
         if (prefs.paired) {
             io.execute {
@@ -1919,12 +2607,12 @@ class MainActivity : ComponentActivity() {
             val card = LinearLayout(this@MainActivity).apply {
                 orientation = LinearLayout.VERTICAL
                 background = glassDrawable(20)
-                setPadding(dpx(16), dpx(14), dpx(16), dpx(14))
+                setPadding(dpx(16), dpx(16), dpx(16), dpx(16))
             }
             card.layoutParams = RecyclerView.LayoutParams(
                 RecyclerView.LayoutParams.MATCH_PARENT,
                 RecyclerView.LayoutParams.WRAP_CONTENT
-            ).also { it.bottomMargin = dpx(10) }
+            ).also { it.bottomMargin = dpx(12) }
             card.pressAnimation()
             return VH(card)
         }
@@ -1949,7 +2637,7 @@ class MainActivity : ComponentActivity() {
             }
             row.addView(
                 cover,
-                LinearLayout.LayoutParams(dpx(58), dpx(78)).also { it.marginEnd = dpx(12) }
+                LinearLayout.LayoutParams(dpx(68), dpx(92)).also { it.marginEnd = dpx(14) }
             )
 
             val body = LinearLayout(this@MainActivity).apply {
@@ -1960,8 +2648,8 @@ class MainActivity : ComponentActivity() {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
             }
-            val title = titleText(game.title, 16f).apply {
-                maxLines = 1
+            val title = titleText(game.title, 17f).apply {
+                maxLines = 2
                 ellipsize = TextUtils.TruncateAt.END
             }
             val badge = TextView(this@MainActivity).apply {
@@ -1993,7 +2681,7 @@ class MainActivity : ComponentActivity() {
                     resources.getQuantityString(
                         R.plurals.options_summary,
                         game.options.size,
-                        Ps5Client.formatBytes(game.bestSize),
+                        sizeLabel(game.bestSize),
                         game.options.size,
                     ),
                     11f
