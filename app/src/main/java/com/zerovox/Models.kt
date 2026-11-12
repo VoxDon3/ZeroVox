@@ -1,4 +1,4 @@
-package com.orbit.zero
+package com.zerovox
 
 import org.json.JSONObject
 
@@ -9,6 +9,13 @@ data class Storage(
     val freeBytes: Long,
     val totalBytes: Long,
     val external: Boolean,
+)
+
+data class FileEntry(
+    val name: String,
+    val dir: Boolean,
+    val size: Long,
+    val mtime: Long,
 )
 
 data class GameOption(
@@ -97,7 +104,7 @@ data class Job(
 ) {
     val active: Boolean
         get() = status in setOf(
-            "queued", "downloading", "retrying", "verifying",
+            "queued", "downloading", "retrying", "verifying", "finalizing",
             "waiting-extraction", "inspecting", "extracting"
         )
     val complete: Boolean get() = status == "complete"
@@ -106,3 +113,10 @@ data class Job(
     val installable: PackageInfo?
         get() = packages.firstOrNull { it.state == "ready" || it.state == "error" }
 }
+
+data class LibraryGame(
+    val contentId: String,
+    val title: String,
+    val titleId: String,
+    val sizeBytes: Long,
+)

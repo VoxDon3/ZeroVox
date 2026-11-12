@@ -1,9 +1,9 @@
-package com.orbit.zero
+package com.zerovox
 
 import android.content.Context
 
 class Prefs(context: Context) {
-    private val sp = context.applicationContext.getSharedPreferences("orbit_zero", Context.MODE_PRIVATE)
+    private val sp = context.applicationContext.getSharedPreferences("zerovox_prefs", Context.MODE_PRIVATE)
 
     var host: String
         get() = sp.getString("host", "192.168.1.50") ?: "192.168.1.50"
@@ -33,6 +33,10 @@ class Prefs(context: Context) {
         get() = sp.getLong("lastCatalogFetch", 0L)
         set(value) = sp.edit().putLong("lastCatalogFetch", value).apply()
 
+    var catalogId: String
+        get() = sp.getString("catalogId", "orbit") ?: "orbit"
+        set(value) = sp.edit().putString("catalogId", value).apply()
+
     var language: String
         get() = sp.getString("language", "en") ?: "en"
         set(value) = sp.edit().putString("language", value).apply()
@@ -44,6 +48,28 @@ class Prefs(context: Context) {
     var haptics: Boolean
         get() = sp.getBoolean("haptics", true)
         set(value) = sp.edit().putBoolean("haptics", value).apply()
+
+    var parallelConnections: Int
+        get() = sp.getInt("parallelConnections", 16).coerceIn(1, 64)
+        set(value) = sp.edit().putInt("parallelConnections", value.coerceIn(1, 64)).apply()
+
+    var autoExtract: Boolean
+        get() = sp.getBoolean("autoExtract", true)
+        set(value) = sp.edit().putBoolean("autoExtract", value).apply()
+
+    var verifySha256: Boolean
+        get() = sp.getBoolean("verifySha256", true)
+        set(value) = sp.edit().putBoolean("verifySha256", value).apply()
+
+    var keepArchive: Boolean
+        get() = sp.getBoolean("keepArchive", true)
+        set(value) = sp.edit().putBoolean("keepArchive", value).apply()
+
+    var transferStateJson: String
+        get() = sp.getString("transferStateJson", "") ?: ""
+        set(value) {
+            sp.edit().putString("transferStateJson", value).commit()
+        }
 
     val baseUrl: String get() = "http://$host:$port"
     val paired: Boolean get() = token.length == 64

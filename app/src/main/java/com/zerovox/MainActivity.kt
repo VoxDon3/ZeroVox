@@ -1,4 +1,4 @@
-package com.orbit.zero
+package com.zerovox
 
 import android.Manifest
 import android.annotation.SuppressLint
@@ -18,6 +18,9 @@ import android.os.Handler
 import android.os.Looper
 import android.os.Environment
 import android.net.Uri
+import android.content.ContentValues
+import android.provider.MediaStore
+import android.util.Log
 import android.provider.Settings
 import android.text.Editable
 import android.text.TextUtils
@@ -76,7 +79,8 @@ class MainActivity : ComponentActivity() {
 
     private lateinit var content: FrameLayout
     private lateinit var navBar: LinearLayout
-    private lateinit var statusPill: TextView
+    private lateinit var statusOrb: ImageView
+    private lateinit var statusName: ImageView
     private val navItems = LinkedHashMap<String, TextView>()
 
     private var tab = "catalog"
@@ -86,12 +90,19 @@ class MainActivity : ComponentActivity() {
     private var catalogList: RecyclerView? = null
     private var catalogRetry: Button? = null
     private var catalogLoading = false
+    private var catalogLoadingId: String? = null
+    private var catalogLoadToken = 0
+    private val catalogSearchHandler = Handler(Looper.getMainLooper())
+    private val catalogSearchRunnable = Runnable { applyCatalogFilter() }
     private var query = ""
     private var platform = "all"
     private var refreshRunnable: Runnable? = null
     private var refreshing = false
     private var connectionCheckRunning = false
     private var setupAfterPair = "catalog"
+
+    private var filesStorage = "data"
+    private var filesPath = ""
 
     private var cheatGames: List<CheatGame> = emptyList()
     private var cheatsQuery = ""
@@ -107,10 +118,13 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        val startupPrefs = getSharedPreferences("orbit_zero", MODE_PRIVATE)
+        val startupPrefs = getSharedPreferences("zerovox_prefs", MODE_PRIVATE)
         setTheme(if (startupPrefs.getBoolean("lightTheme", false)) R.style.Theme_ZeroVox_Light else R.style.Theme_ZeroVox)
+        installCrashLogger()
         super.onCreate(savedInstanceState)
         prefs = Prefs(this)
+        TransferStore.init(this)
+        CatalogRepo.setCurrentCatalog(prefs.catalogId)
         Palette.applyTheme(prefs.lightTheme)
         Haptics.enabled = prefs.haptics
         api = Ps5Client(prefs)
@@ -135,11 +149,67 @@ class MainActivity : ComponentActivity() {
             else -> showCatalog()
         }
         loadCatalog(false)
+        io.execute {
+            CatalogRepo.loadHomebrew(this) {
+                runOnUiThread { if (tab == "downloads") showDownloads() }
+            }
+        }
         bootstrapAgent()
     }
 
+    private fun installCrashLogger() {
+        val previous = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            runCatching { writeCrashLog(thread, throwable) }
+            previous?.uncaughtException(thread, throwable)
+        }
+    }
+
+    private fun writeCrashLog(thread: Thread, throwable: Throwable) {
+        val sb = StringBuilder()
+        sb.append("thread=${thread.name}\n")
+        var t: Throwable? = throwable
+        var depth = 0
+        while (t != null && depth < 12) {
+            sb.append("==== ${t.javaClass.name}: ${t.message}\n")
+            for (element in t.stackTrace) sb.append("\tat $element\n")
+            val cause = t.cause
+            if (cause === t) break
+            t = cause
+            depth++
+        }
+        val text = sb.toString()
+        Log.e("ZeroVoxCrash", text)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val values = ContentValues().apply {
+                put(MediaStore.MediaColumns.DISPLAY_NAME, "zerovox_crash.txt")
+                put(MediaStore.MediaColumns.MIME_TYPE, "text/plain")
+                put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+                put(MediaStore.Downloads.IS_PENDING, 1)
+            }
+            val resolver = contentResolver
+            val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+            if (uri != null) {
+                resolver.openOutputStream(uri)?.use { it.write(text.toByteArray(Charsets.UTF_8)) }
+                values.clear()
+                values.put(MediaStore.Downloads.IS_PENDING, 0)
+                resolver.update(uri, values, null, null)
+            }
+        } else {
+            runCatching {
+                File(
+                    Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+                    "zerovox_crash.txt"
+                ).writeText(text)
+            }
+        }
+    }
+
     private fun bootstrapAgent() {
-        if (!prefs.hostConfigured || !prefs.autoLoadAgent || prefs.paired) return
+        // Inject the agent on every app open when the host is set, even after pairing
+        // (e.g. the PS5 rebooted and the agent died). ensureRunning is a no-op when
+        // the agent is already listening on 33333.
+        if (!prefs.hostConfigured || !prefs.autoLoadAgent) return
         io.execute {
             val host = prefs.host
             val started = AgentLoader.ensureRunning(this@MainActivity, host)
@@ -153,17 +223,19 @@ class MainActivity : ComponentActivity() {
                                 prefs.token = token
                                 refreshConnectionPill()
                                 loadStorage { setTab("catalog") }
-                            }
-                        }
                     }
+                } else if (started) {
+                    refreshConnectionPill()
                 }
             }
+        }
+    }
         }
     }
 
     override fun onResume() {
         super.onResume()
-        if (::statusPill.isInitialized) refreshConnectionPill()
+        if (::statusOrb.isInitialized) refreshConnectionPill()
     }
 
     private fun confirmExit() {
@@ -312,9 +384,14 @@ class MainActivity : ComponentActivity() {
         row.addView(View(this), LinearLayout.LayoutParams(dpx(10), 1))
         row.addView(actionButton(getString(R.string.confirm_delete_confirm), true) {
             dialog.dismiss()
-            val wasRunning = t.running
-            if (wasRunning) TransferStore.cancelRequested = true
-            if (!wasRunning) deleteDownloadedFile(t.uri, t.filename)
+            if (t.running) {
+                TransferStore.cancelRequested = true
+                TransferStore.pauseRequested = false
+            } else if (t.state == "paused" || (t.mode == "local" && t.state !in setOf("complete", "sent"))) {
+                deletePartialTransfer(t)
+            } else if (t.state == "complete" && t.uri.isNotBlank()) {
+                deleteDownloadedFile(t.uri, t.filename)
+            }
             TransferStore.clear()
             toast(getString(R.string.deleted, t.title.ifBlank { t.filename }))
             setTab("downloads")
@@ -329,6 +406,20 @@ class MainActivity : ComponentActivity() {
             WindowManager.LayoutParams.WRAP_CONTENT
         )
         dialog.window?.decorView?.layoutDirection = resources.configuration.layoutDirection
+    }
+
+    private fun deletePartialTransfer(t: TransferState) {
+        val uriStr = t.uri
+        if (uriStr.startsWith("content:")) {
+            runCatching { contentResolver.delete(Uri.parse(uriStr), null, null) }
+            return
+        }
+        val file = when {
+            uriStr.startsWith("file:") -> runCatching { Uri.parse(uriStr).path?.let { java.io.File(it) } }.getOrNull()
+            t.path.isNotBlank() -> java.io.File(t.path)
+            else -> null
+        }
+        if (file != null) runCatching { file.delete() }
     }
 
     private fun deleteDownloadedFile(uri: String, filename: String) {
@@ -354,11 +445,6 @@ class MainActivity : ComponentActivity() {
         io.shutdownNow()
     }
 
-    private fun statusDot(color: Int): GradientDrawable = GradientDrawable().apply {
-        shape = GradientDrawable.OVAL
-        setColor(color)
-        setSize(dpx(8), dpx(8))
-    }
 
     private fun requestNotificationPermission() {
         if (Build.VERSION.SDK_INT >= 33 &&
@@ -423,9 +509,7 @@ class MainActivity : ComponentActivity() {
                 FrameLayout.LayoutParams.MATCH_PARENT
             )
         )
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-        }
+        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         outer.addView(
             root,
             FrameLayout.LayoutParams(
@@ -438,67 +522,82 @@ class MainActivity : ComponentActivity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             layoutDirection = View.LAYOUT_DIRECTION_LTR
-            setPadding(dpx(20), dpx(14), dpx(20), dpx(10))
+            setPadding(dpx(12), dpx(8), dpx(8), dpx(8))
         }
-        val orbit = TextView(this).apply {
+        val brandZero = TextView(this).apply {
             text = "ZERO"
-            textSize = 21f
+            textSize = 15f
             setTextColor(Palette.neon)
             typeface = Typeface.create("sans-serif-black", Typeface.NORMAL)
-            letterSpacing = 0.18f
+            letterSpacing = 0.08f
         }
-        val zero = TextView(this).apply {
+        val brandVox = TextView(this).apply {
             text = "VOX"
-            textSize = 21f
+            textSize = 15f
             setTextColor(Palette.text)
             typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
-            letterSpacing = 0.18f
-            setPadding(dpx(6), 0, 0, 0)
+            letterSpacing = 0.08f
+            setPadding(dpx(4), 0, 0, 0)
         }
-        statusPill = TextView(this).apply {
-            textSize = 15f
-            setPadding(dpx(16), dpx(8), dpx(16), dpx(8))
-            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-            maxLines = 1
-            isSingleLine = true
-            includeFontPadding = false
-            gravity = Gravity.CENTER
-            compoundDrawablePadding = dpx(6)
+        val pill = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            layoutDirection = View.LAYOUT_DIRECTION_LTR
+            setPadding(dpx(8), dpx(5), dpx(8), dpx(5))
+            background = glassDrawable(34)
         }
-        val statusColumn = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.END
+        statusOrb = ImageView(this).apply {
+            setImageResource(R.drawable.orb_checking)
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            layoutParams = LinearLayout.LayoutParams(dpx(24), dpx(24))
         }
-        statusColumn.addView(statusPill)
+        statusName = ImageView(this).apply {
+            setImageResource(R.drawable.name_checking)
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            layoutParams = LinearLayout.LayoutParams(dpx(72), dpx(18)).apply {
+                leftMargin = dpx(3)
+            }
+        }
+        pill.addView(statusOrb)
+        pill.addView(statusName)
         val settingsButton = ImageView(this).apply {
             setImageResource(R.drawable.ic_settings)
             setColorFilter(Palette.textSecondary)
             contentDescription = getString(R.string.settings_title)
-            setPadding(dpx(7), dpx(7), dpx(7), dpx(7))
+            setPadding(dpx(5), dpx(5), dpx(5), dpx(5))
             pressAnimation()
             setOnClickListener { showSettingsDialog() }
         }
-        statusColumn.addView(
-            settingsButton,
-            LinearLayout.LayoutParams(dpx(34), dpx(34)).apply {
-                gravity = Gravity.END
-                topMargin = dpx(2)
-            }
-        )
-        header.addView(orbit)
-        header.addView(zero)
-        header.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
+        val logoRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            layoutDirection = View.LAYOUT_DIRECTION_LTR
+        }
+        logoRow.addView(brandZero)
+        logoRow.addView(brandVox)
         header.addView(
-            statusColumn,
+            pill,
             LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
-            )
+            ).apply {
+                gravity = Gravity.CENTER_VERTICAL
+                leftMargin = dpx(6)
+                rightMargin = dpx(10)
+            }
+        )
+        header.addView(logoRow, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        header.addView(
+            settingsButton,
+            LinearLayout.LayoutParams(dpx(30), dpx(30)).apply {
+                gravity = Gravity.CENTER_VERTICAL
+            }
         )
         root.addView(header)
-
         content = FrameLayout(this)
-        root.addView(content, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
+        root.addView(content, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f
+        ))
 
         navBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -506,15 +605,14 @@ class MainActivity : ComponentActivity() {
             setPadding(dpx(6), dpx(6), dpx(6), dpx(6))
             visibility = View.GONE
         }
-        val navParams = LinearLayout.LayoutParams(
+        root.addView(navBar, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
         ).apply {
             setMargins(dpx(16), dpx(4), dpx(16), dpx(14))
-        }
-        root.addView(navBar, navParams)
-
+        })
         addNavItem("catalog", getString(R.string.nav_catalog))
         addNavItem("downloads", getString(R.string.nav_downloads))
+        addNavItem("files", getString(R.string.nav_files))
         addNavItem("console", getString(R.string.nav_console))
         addNavItem("cheats", getString(R.string.nav_cheats))
 
@@ -566,6 +664,7 @@ class MainActivity : ComponentActivity() {
         when (key) {
             "catalog" -> showCatalog()
             "downloads" -> showDownloads()
+            "files" -> showFiles()
             "console" -> showConsole()
             "cheats" -> showCheats()
         }
@@ -580,16 +679,15 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun setConnectionPill(text: String, color: Int, connected: Boolean) {
-        statusPill.text = text
-        statusPill.setTextColor(color)
-        statusPill.setCompoundDrawablesRelativeWithIntrinsicBounds(statusDot(color), null, null, null)
-        statusPill.background = if (connected) glassDrawable(
-            30, Palette.connectedTop, Palette.connectedBottom,
-            Color.parseColor(Palette.connectedStroke), mid = Palette.connectedMid
-        ) else glassDrawable(
-            30, Palette.unpairedTop, Palette.unpairedBottom,
-            Color.parseColor(Palette.unpairedStroke), mid = Palette.unpairedMid
-        )
+        val checking = text == getString(R.string.status_checking)
+        val orbRes = if (connected) R.drawable.orb_connected
+                     else if (checking) R.drawable.orb_checking
+                     else R.drawable.orb_unpaired
+        val nameRes = if (connected) R.drawable.name_connected
+                      else if (checking) R.drawable.name_checking
+                      else R.drawable.name_unpaired
+        statusOrb.setImageResource(orbRes)
+        statusName.setImageResource(nameRes)
     }
 
     private fun refreshConnectionPill() {
@@ -642,6 +740,7 @@ class MainActivity : ComponentActivity() {
         when (tab) {
             "catalog" -> loadCatalog(true)
             "downloads" -> showDownloads()
+            "files" -> showFiles()
             "console" -> showConsole()
             "cheats" -> showCheats()
             else -> setTab(tab)
@@ -655,6 +754,55 @@ class MainActivity : ComponentActivity() {
     // ------------------------------------------------------------------ setup
 
     @SuppressLint("SetTextI18n")
+    private fun showAppmetaDump() {
+        val dialog = Dialog(this)
+        val col = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = glassDrawable(26)
+            setPadding(dpx(14), dpx(16), dpx(14), dpx(14))
+        }
+        col.addView(titleText("Debug · /user/appmeta", 19f))
+        col.addView(spacer(10))
+        val status = bodyText("")
+        status.setTextColor(Palette.neon)
+        col.addView(status)
+        col.addView(spacer(10))
+        val btn = actionButton("Close", true) { dialog.dismiss() }
+        col.addView(btn)
+        dialog.setContentView(col)
+        dialog.window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+        dialog.show()
+        dialog.window?.setLayout(
+            (resources.displayMetrics.widthPixels * 0.94f).toInt(),
+            WindowManager.LayoutParams.MATCH_PARENT
+        )
+        dialog.window?.decorView?.layoutDirection = resources.configuration.layoutDirection
+        status.text = "fetching…"
+        io.execute {
+            val r = api.call("GET", "/api/v1/debug/appmeta")
+            runOnUiThread {
+                val tv = TextView(this).apply {
+                    text = if (r.ok) r.body else "error: " + r.message() + "\n" + r.body
+                    setTextColor(0xFFE8EDF6.toInt())
+                    textSize = 9.5f
+                    typeface = Typeface.MONOSPACE
+                    setTextIsSelectable(true)
+                }
+                val sv = ScrollView(this).apply {
+                    addView(tv)
+                    layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        0,
+                        1f
+                    )
+                }
+                col.addView(sv, 1)
+                col.removeView(btn)
+                col.addView(btn)
+            }
+        }
+    }
+
     private fun showSetup(afterPair: String = "catalog") {
         setupAfterPair = afterPair
         tab = "setup"
@@ -670,6 +818,8 @@ class MainActivity : ComponentActivity() {
         col.addView(bodyText(getString(R.string.setup_subtitle)))
         col.addView(spacer(12))
         col.addView(actionButton(getString(R.string.browse_catalog), false) { showCatalog() })
+        col.addView(spacer(8))
+        col.addView(actionButton("Debug · dump /user/appmeta", false) { showAppmetaDump() })
         col.addView(spacer(18))
 
         val card = glassCard(20)
@@ -771,7 +921,8 @@ class MainActivity : ComponentActivity() {
                 override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) = Unit
                 override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {
                     query = s?.toString() ?: ""
-                    applyCatalogFilter()
+                    catalogSearchHandler.removeCallbacks(catalogSearchRunnable)
+                    catalogSearchHandler.postDelayed(catalogSearchRunnable, 200)
                 }
                 override fun afterTextChanged(s: Editable?) = Unit
             })
@@ -806,8 +957,9 @@ class MainActivity : ComponentActivity() {
                 setOnClickListener {
                     if (CatalogRepo.currentCatalogId == c.id) return@setOnClickListener
                     CatalogRepo.setCurrentCatalog(c.id)
+                    prefs.catalogId = c.id
                     styleCatalogChips()
-                    loadCatalog(true)
+                    loadCatalog(false)
                 }
             }
             catalogChipViews[c.id] = tv
@@ -917,6 +1069,9 @@ class MainActivity : ComponentActivity() {
         }
         content.addView(swipe, FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)
         applyCatalogFilter()
+        if (CatalogRepo.games.isEmpty() && catalogLoadingId != CatalogRepo.currentCatalogId) {
+            loadCatalog(false)
+        }
     }
 
     private fun applyCatalogFilter() {
@@ -947,13 +1102,29 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun loadCatalog(force: Boolean) {
+        val catalogId = CatalogRepo.currentCatalogId
+        if (catalogLoadingId == catalogId && !force) return
+        val token = ++catalogLoadToken
+        catalogLoadingId = catalogId
         catalogLoading = true
         if (tab == "catalog") applyCatalogFilter()
         io.execute {
-            CatalogRepo.load(this@MainActivity, force, CatalogRepo.currentCatalogId)
+            CatalogRepo.load(this@MainActivity, force, catalogId) {
+                runOnUiThread {
+                    if (token == catalogLoadToken && tab == "catalog" &&
+                        CatalogRepo.currentCatalogId == catalogId
+                    ) {
+                        applyCatalogFilter()
+                    }
+                }
+            }
             runOnUiThread {
+                if (token != catalogLoadToken) return@runOnUiThread
                 catalogLoading = false
-                if (tab == "catalog") applyCatalogFilter()
+                catalogLoadingId = null
+                if (tab == "catalog" && CatalogRepo.currentCatalogId == catalogId) {
+                    applyCatalogFilter()
+                }
             }
         }
     }
@@ -1131,6 +1302,7 @@ class MainActivity : ComponentActivity() {
             putExtra("mode", mode)
             putExtra("filename", option.filename)
             putExtra("size", option.sizeBytes)
+            putExtra("password", option.password)
         }
         webDownloadLauncher.launch(intent)
     }
@@ -1244,6 +1416,18 @@ class MainActivity : ComponentActivity() {
     private fun sizeLabel(bytes: Long): String =
         if (bytes > 0) Ps5Client.formatBytes(bytes) else "—"
 
+    private fun etaText(received: Long, total: Long, speed: Double): String {
+        if (speed <= 0.0 || total <= received) return ""
+        val secs = ((total - received) / speed).toLong().coerceAtLeast(1)
+        val text = when {
+            secs >= 86400 -> "${secs / 86400}d ${(secs % 86400) / 3600}h"
+            secs >= 3600 -> "${secs / 3600}h ${(secs % 3600) / 60}m"
+            secs >= 60 -> "${secs / 60}m ${secs % 60}s"
+            else -> "${secs}s"
+        }
+        return " · " + getString(R.string.eta_label, text)
+    }
+
     private fun fileNameFor(option: GameOption): String {
         val fromUrl = option.url
             .substringBefore('?')
@@ -1299,6 +1483,15 @@ class MainActivity : ComponentActivity() {
         val local = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         col.addView(local)
         renderLocal(local)
+        if (CatalogRepo.games.isEmpty()) {
+            io.execute {
+                CatalogRepo.load(this, false) {
+                    runOnUiThread {
+                        if (tab == "downloads") renderLocal(local)
+                    }
+                }
+            }
+        }
 
         if (!prefs.paired) {
             startRefresh { if (tab == "downloads") renderLocal(local) }
@@ -1314,15 +1507,43 @@ class MainActivity : ComponentActivity() {
             if (!refreshing) {
                 refreshing = true
                 io.execute {
-                    val jobs = Ps5Client.parseJobs(api.downloads())
-                    val receipts = Ps5Client.parseReceipts(api.installations())
+                    val dr = api.downloads()
+                    val ir = api.installations()
+                    val jobs = Ps5Client.parseJobs(dr)
+                    val receipts = Ps5Client.parseReceipts(ir)
+                    val netError = when {
+                        !dr.ok && !ir.ok -> "${dr.message()} · ${ir.message()}"
+                        !dr.ok -> dr.message()
+                        !ir.ok -> ir.message()
+                        else -> null
+                    }
                     runOnUiThread {
                         refreshing = false
                         if (tab != "downloads") return@runOnUiThread
                         ps5Section.removeAllViews()
                         if (jobs.isNotEmpty()) {
                             ps5Section.addView(hairline())
-                            ps5Section.addView(accentText(getString(R.string.ps5_queue)))
+                            val qHeader = LinearLayout(this@MainActivity).apply {
+                                orientation = LinearLayout.HORIZONTAL
+                                gravity = android.view.Gravity.CENTER_VERTICAL
+                            }
+                            qHeader.addView(
+                                accentText(getString(R.string.ps5_queue)),
+                                LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                            )
+                            val hasFinished = jobs.any { !it.active && (it.complete || it.status == "error" || it.status == "cancelled") }
+                            if (hasFinished) {
+                                qHeader.addView(actionButton(getString(R.string.action_clear_finished), false) {
+                                    io.execute {
+                                        val cr = api.clearFinishedDownloads()
+                                        runOnUiThread {
+                                            if (!cr.ok) toast(getString(R.string.action_failed, cr.message()))
+                                            if (tab == "downloads") showDownloads()
+                                        }
+                                    }
+                                })
+                            }
+                            ps5Section.addView(qHeader)
                             val queue = LinearLayout(this@MainActivity).apply {
                                 orientation = LinearLayout.VERTICAL
                             }
@@ -1359,7 +1580,7 @@ class MainActivity : ComponentActivity() {
         val t = TransferStore.current
         val showTransfer = when {
             t.state == "idle" -> false
-            t.running -> true
+            t.running || t.state == "paused" -> true
             t.state == "complete" && t.uri.isNotBlank() ->
                 PhoneDownloads.exists(this, t.uri, t.filename)
             else -> true
@@ -1374,13 +1595,20 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun findCatalogGame(title: String, titleId: String, filename: String): Game? {
-        val games = CatalogRepo.games
+        return findCatalogGameIn(CatalogRepo.games, title, titleId, filename)
+            ?: findCatalogGameIn(CatalogRepo.homebrewGames, title, titleId, filename)
+    }
+
+    private fun findCatalogGameIn(games: List<Game>, title: String, titleId: String, filename: String): Game? {
         if (games.isEmpty()) return null
         val ids = LinkedHashSet<String>()
         if (titleId.isNotBlank()) ids.add(titleId.uppercase())
         Regex("(CUSA|PPSA)\\d{5}", RegexOption.IGNORE_CASE)
             .find(filename)?.value?.let { ids.add(it.uppercase()) }
+        Regex("(?i)(?<![A-Z])(PSA)(\\d{5})").find(filename)?.let { ids.add("PPSA${it.groupValues[2]}") }
+        Regex("(?i)(?<![A-Z])(USA)(\\d{5})").find(filename)?.let { ids.add("CUSA${it.groupValues[2]}") }
         for (id in ids) games.firstOrNull { it.titleId.equals(id, true) }?.let { return it }
+        games.firstOrNull { g -> g.options.any { it.filename.equals(filename, true) } }?.let { return it }
         val t = title.ifBlank { filename.substringBeforeLast('.') }.trim().lowercase()
         val fn = filename.lowercase()
         if (t.isNotBlank()) {
@@ -1398,8 +1626,18 @@ class MainActivity : ComponentActivity() {
             scaleType = ImageView.ScaleType.CENTER_CROP
             clipToOutline = true
             background = glassDrawable(10, Palette.coverTop, Palette.coverBottom, mid = Palette.coverMid)
-            if (!url.isNullOrBlank() && url.startsWith("http")) load(url) { crossfade(true) }
+            if (!url.isNullOrBlank() && url.startsWith("http")) loadCover(url)
             layoutParams = LinearLayout.LayoutParams(dpx(width), dpx(height))
+        }
+    }
+
+    private fun ImageView.loadCover(url: String) {
+        load(url) {
+            crossfade(true)
+            listener(onError = { _, _ ->
+                val fixed = url.replace("%20", "")
+                if (fixed != url) load(fixed) { crossfade(true) }
+            })
         }
     }
 
@@ -1501,30 +1739,47 @@ class MainActivity : ComponentActivity() {
             body.addView(bodyText(d.message, 11f).apply { setTextColor(Palette.danger) })
         }
         if (d.state == "complete" && d.uri.isNotBlank()) {
-            body.addView(accentText(getString(R.string.send_to_ps5), 11f).apply {
-                setPadding(0, dpx(4), 0, 0)
-                pressAnimation()
-                setOnClickListener {
-                    if (!prefs.paired) {
-                        toast(getString(R.string.pair_required))
-                        showSetup()
-                        return@setOnClickListener
-                    }
-                    if (TransferStore.current.running) {
-                        toast(getString(R.string.transfer_in_progress))
-                        setTab("downloads")
-                        return@setOnClickListener
-                    }
-                    chooseStorage(getString(R.string.send_to_ps5)) { storage ->
-                        startSendToPs5(d, storage)
-                    }
+            body.addView(actionButton(getString(R.string.send_to_ps5), true) {
+                if (!prefs.paired) {
+                    toast(getString(R.string.pair_required))
+                    showSetup()
+                    return@actionButton
                 }
-            })
+                if (TransferStore.current.running) {
+                    toast(getString(R.string.transfer_in_progress))
+                    setTab("downloads")
+                    return@actionButton
+                }
+                chooseStorage(getString(R.string.send_to_ps5)) { storage ->
+                    startSendToPs5(d, storage)
+                }
+            }, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+            ).also { it.topMargin = dpx(8) })
         }
 
         row.addView(body, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         card.addView(row)
         container.addView(card)
+    }
+
+
+    private fun resumeLocalTransfer() {
+        val t = TransferStore.current
+        if (t.url.isBlank()) return
+        val intent = Intent(this, TransferService::class.java).apply {
+            putExtra("mode", "local")
+            putExtra("resume", true)
+            putExtra("title", t.title)
+            putExtra("url", t.url)
+            putExtra("filename", t.filename)
+            putExtra("size", t.total)
+            putExtra("sha256", t.sha256)
+            putExtra("cookie", t.cookie)
+            putExtra("userAgent", t.userAgent)
+            putExtra("origin", t.origin)
+        }
+        ContextCompat.startForegroundService(this, intent)
     }
 
     private fun addTransferCard(container: LinearLayout, t: TransferState) {
@@ -1564,6 +1819,7 @@ class MainActivity : ComponentActivity() {
             "complete" -> getString(R.string.state_complete)
             "error" -> getString(R.string.state_error)
             "cancelled" -> getString(R.string.state_cancelled)
+            "paused" -> getString(R.string.state_paused)
             else -> t.state
         }
         body.addView(bodyText(stateLabel, 11f).apply {
@@ -1578,7 +1834,8 @@ class MainActivity : ComponentActivity() {
             })
             body.addView(bodyText(
                 "${Ps5Client.formatBytes(t.received)} / ${Ps5Client.formatBytes(t.total)} · ${t.percent}%" +
-                    if (t.speed > 0) " · ${Ps5Client.formatBytes(t.speed.toLong())}/s" else "",
+                    (if (t.speed > 0) " · ${Ps5Client.formatBytes(t.speed.toLong())}/s" else "") +
+                    etaText(t.received, t.total, t.speed),
                 11f
             ))
         } else if (t.running) {
@@ -1610,16 +1867,49 @@ class MainActivity : ComponentActivity() {
                     ellipsize = TextUtils.TruncateAt.MIDDLE
                 })
             }
-        } else if (!t.running && t.message.isNotBlank()) {
+        } else if (!t.running && t.state != "paused" && t.message.isNotBlank()) {
             body.addView(bodyText(t.message, 11f).apply { setTextColor(Palette.textDim) })
         }
-        if (t.running) {
-            body.addView(actionButton(getString(R.string.cancel_transfer), false) {
-                TransferStore.cancelRequested = true
-                toast(getString(R.string.cancelling))
-            }, LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
-            ).also { it.topMargin = dpx(8) })
+
+        if (t.running || t.state == "paused") {
+            val canPauseResume = t.mode == "local" && t.url.isNotBlank()
+            val btnRow = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+                ).also { it.topMargin = dpx(8) }
+            }
+            if (canPauseResume) {
+                val pauseLabel = if (t.state == "paused") "▶  " + getString(R.string.resume_transfer)
+                                 else "⏸  " + getString(R.string.pause_transfer)
+                btnRow.addView(
+                    actionButton(pauseLabel, t.state == "paused") {
+                        if (t.state == "paused") {
+                            resumeLocalTransfer()
+                        } else {
+                            TransferStore.pause()
+                        }
+                    },
+                    LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                )
+                btnRow.addView(View(this), LinearLayout.LayoutParams(dpx(8), 1))
+            }
+            btnRow.addView(
+                actionButton(getString(R.string.cancel_transfer), false) {
+                    if (t.running) {
+                        TransferStore.cancelRequested = true
+                        TransferStore.pauseRequested = false
+                        toast(getString(R.string.cancelling))
+                    } else {
+                        deletePartialTransfer(t)
+                        TransferStore.clear()
+                        toast(getString(R.string.notif_cancelled))
+                        if (tab == "downloads") showDownloads()
+                    }
+                },
+                LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            )
+            body.addView(btnRow)
         } else if (t.state == "complete" && t.uri.isNotBlank()) {
             body.addView(actionButton(getString(R.string.send_to_ps5), true) {
                 startSendToPs5FromTransfer(t)
@@ -1687,7 +1977,8 @@ class MainActivity : ComponentActivity() {
                 body.addView(
                     bodyText(
                         "${Ps5Client.formatBytes(job.received)} / ${Ps5Client.formatBytes(job.total)} · ${job.percent}%" +
-                            if (job.speed > 0) " · ${Ps5Client.formatBytes(job.speed.toLong())}/s" else "",
+                            (if (job.speed > 0) " · ${Ps5Client.formatBytes(job.speed.toLong())}/s" else "") +
+                            etaText(job.received, job.total, job.speed),
                         11f
                     )
                 )
@@ -1837,6 +2128,351 @@ class MainActivity : ComponentActivity() {
 
     // ---------------------------------------------------------------- console
 
+    private fun showFiles() {
+        tab = "files"
+        navBar.visibility = View.VISIBLE
+        for ((k, v) in navItems) {
+            val selected = k == "files"
+            v.background = chipDrawable(selected)
+            v.setTextColor(if (selected) Palette.neon else Palette.textSecondary)
+        }
+        val col = scrollContent()
+        col.addView(titleText(getString(R.string.files_title), 24f))
+        col.addView(spacer(10))
+        if (!prefs.paired) {
+            col.addView(bodyText(getString(R.string.pair_required)))
+            return
+        }
+
+        val storageRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        col.addView(storageRow)
+        col.addView(spacer(10))
+
+        val crumb = bodyText("", 12f)
+        val up = actionButton(getString(R.string.files_up), false) { }
+        val crumbRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        crumbRow.addView(up)
+        crumbRow.addView(View(this), LinearLayout.LayoutParams(dpx(8), 1))
+        crumbRow.addView(crumb, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        col.addView(crumbRow)
+        col.addView(spacer(10))
+
+        val listHost = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+
+        fun load(storage: String, path: String) {
+            filesStorage = storage
+            filesPath = path
+            crumb.text = "/" + path
+            up.alpha = if (path.isNotEmpty()) 1f else 0.4f
+            up.setOnClickListener {
+                if (filesPath.isNotEmpty()) load(filesStorage, parentPath(filesPath))
+            }
+            listHost.removeAllViews()
+            listHost.addView(bodyText(getString(R.string.files_loading)))
+            io.execute {
+                val r = api.files(storage, path)
+                val entries = Ps5Client.parseFiles(r)
+                runOnUiThread {
+                    if (tab != "files") return@runOnUiThread
+                    listHost.removeAllViews()
+                    if (!r.ok) {
+                        listHost.addView(
+                            bodyText(getString(R.string.files_action_failed, r.message()), 12f).apply {
+                                setTextColor(Palette.danger)
+                            }
+                        )
+                        return@runOnUiThread
+                    }
+                    renderFiles(
+                        listHost, path, entries,
+                        openDir = { child -> load(storage, child) },
+                        onFile = { entry -> showFileActions(storage, path, entry) { load(storage, path) } }
+                    )
+                }
+            }
+        }
+
+        val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        actions.addView(
+            actionButton(getString(R.string.files_new_folder), false) {
+                promptText(
+                    getString(R.string.files_new_folder), "",
+                    getString(R.string.files_name_hint)
+                ) { name ->
+                    if (name.isBlank()) return@promptText
+                    val target = if (filesPath.isEmpty()) name else "${filesPath}/$name"
+                    io.execute {
+                        val r = api.fileAction(filesStorage, "mkdir", target)
+                        runOnUiThread {
+                            if (!r.ok) toast(getString(R.string.files_action_failed, r.message()))
+                            else load(filesStorage, filesPath)
+                        }
+                    }
+                }
+            },
+            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        )
+        actions.addView(View(this), LinearLayout.LayoutParams(dpx(10), 1))
+        actions.addView(
+            actionButton(getString(R.string.files_refresh), true) {
+                load(filesStorage, filesPath)
+            },
+            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        )
+        col.addView(actions)
+        col.addView(spacer(12))
+        col.addView(listHost)
+
+        io.execute {
+            val sr = api.storage()
+            val storages = Ps5Client.parseStorage(sr)
+            runOnUiThread {
+                if (tab != "files") return@runOnUiThread
+                storageRow.removeAllViews()
+                val list = storages.ifEmpty {
+                    listOf(Storage("data", "data", "/data", 0L, 0L, false))
+                }
+                for ((idx, s) in list.withIndex()) {
+                    if (idx > 0) storageRow.addView(View(this), LinearLayout.LayoutParams(dpx(8), 1))
+                    storageRow.addView(
+                        actionButton(s.label, s.id == filesStorage) { load(s.id, "") },
+                        LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                    )
+                }
+                load(filesStorage, filesPath)
+            }
+        }
+    }
+
+    private fun parentPath(path: String): String {
+        val idx = path.lastIndexOf('/')
+        return if (idx <= 0) "" else path.substring(0, idx)
+    }
+
+    private fun renderFiles(
+        container: LinearLayout,
+        path: String,
+        entries: List<FileEntry>,
+        openDir: (String) -> Unit,
+        onFile: (FileEntry) -> Unit,
+    ) {
+        container.removeAllViews()
+        if (entries.isEmpty()) {
+            container.addView(bodyText(getString(R.string.files_empty)))
+            return
+        }
+        for (e in entries) {
+            val card = softCard(10)
+            card.layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+            ).also { it.bottomMargin = dpx(8) }
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            val badge = TextView(this).apply {
+                text = if (e.dir) getString(R.string.files_dir)
+                else e.name.substringAfterLast('.', "").uppercase().take(4)
+                    .ifBlank { getString(R.string.files_file) }
+                textSize = 9f
+                gravity = Gravity.CENTER
+                setTextColor(if (e.dir) Palette.neon else Palette.textSecondary)
+                typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+                background = chipDrawable(false)
+                setPadding(dpx(6), dpx(4), dpx(6), dpx(4))
+            }
+            row.addView(
+                badge,
+                LinearLayout.LayoutParams(dpx(52), LinearLayout.LayoutParams.WRAP_CONTENT)
+                    .also { it.marginEnd = dpx(10) }
+            )
+            val body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            body.addView(titleText(e.name, 14f).apply {
+                maxLines = 1
+                ellipsize = TextUtils.TruncateAt.END
+            })
+            body.addView(bodyText(
+                if (e.dir) getString(R.string.files_dir) else Ps5Client.formatBytes(e.size), 11f
+            ))
+            row.addView(body, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            card.addView(row)
+            card.setOnClickListener {
+                if (e.dir) openDir(if (path.isEmpty()) e.name else "$path/${e.name}")
+                else onFile(e)
+            }
+            container.addView(card)
+        }
+    }
+
+    private fun showFileActions(storage: String, path: String, entry: FileEntry, onDone: () -> Unit) {
+        val full = if (path.isEmpty()) entry.name else "$path/${entry.name}"
+        val dialog = Dialog(this)
+        val col = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = glassDrawable(26)
+            setPadding(dpx(20), dpx(20), dpx(20), dpx(18))
+        }
+        col.addView(titleText(entry.name, 20f))
+        col.addView(spacer(4))
+        col.addView(bodyText(Ps5Client.formatBytes(entry.size), 12f))
+        col.addView(spacer(16))
+        col.addView(actionButton(getString(R.string.files_rename), false) {
+            dialog.dismiss()
+            promptText(
+                getString(R.string.files_rename), entry.name,
+                getString(R.string.files_name_hint)
+            ) { name ->
+                if (name.isBlank() || name == entry.name) return@promptText
+                io.execute {
+                    val r = api.fileAction(storage, "rename", full, name = name)
+                    runOnUiThread {
+                        if (!r.ok) toast(getString(R.string.files_action_failed, r.message()))
+                        else {
+                            toast(getString(R.string.files_renamed))
+                            onDone()
+                        }
+                    }
+                }
+            }
+        })
+        col.addView(spacer(8))
+        col.addView(actionButton(getString(R.string.files_move_here), false) {
+            dialog.dismiss()
+            chooseStorage(getString(R.string.files_move_title)) { dest ->
+                promptText(
+                    getString(R.string.files_move_title), "",
+                    getString(R.string.files_move_hint)
+                ) { target ->
+                    io.execute {
+                        val r = api.fileAction(
+                            storage, "move", full,
+                            target = target.trim(), targetStorage = dest.id
+                        )
+                        runOnUiThread {
+                            if (!r.ok) toast(getString(R.string.files_action_failed, r.message()))
+                            else {
+                                toast(getString(R.string.files_moved))
+                                onDone()
+                            }
+                        }
+                    }
+                }
+            }
+        })
+        col.addView(spacer(8))
+        col.addView(actionButton(getString(R.string.files_delete), true) {
+            dialog.dismiss()
+            confirmDeleteFile(storage, full, entry.name, onDone)
+        })
+        col.addView(spacer(14))
+        col.addView(actionButton(getString(R.string.close), false) { dialog.dismiss() })
+
+        dialog.setContentView(col)
+        dialog.window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+        dialog.show()
+        dialog.window?.setLayout(
+            (resources.displayMetrics.widthPixels * 0.85f).toInt(),
+            WindowManager.LayoutParams.WRAP_CONTENT
+        )
+        dialog.window?.decorView?.layoutDirection = resources.configuration.layoutDirection
+    }
+
+    private fun confirmDeleteFile(storage: String, full: String, name: String, onDone: () -> Unit) {
+        val dialog = Dialog(this)
+        val col = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = glassDrawable(26)
+            setPadding(dpx(20), dpx(20), dpx(20), dpx(18))
+        }
+        col.addView(titleText(getString(R.string.confirm_delete_title), 20f))
+        col.addView(spacer(10))
+        col.addView(bodyText(getString(R.string.files_confirm_delete, name), 15f))
+        col.addView(spacer(18))
+        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        row.addView(
+            actionButton(getString(R.string.confirm_delete_cancel), false) { dialog.dismiss() },
+            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        )
+        row.addView(View(this), LinearLayout.LayoutParams(dpx(10), 1))
+        row.addView(
+            actionButton(getString(R.string.confirm_delete_confirm), true) {
+                dialog.dismiss()
+                io.execute {
+                    val r = api.fileAction(storage, "delete", full)
+                    runOnUiThread {
+                        if (!r.ok) toast(getString(R.string.files_action_failed, r.message()))
+                        else {
+                            toast(getString(R.string.files_deleted))
+                            onDone()
+                        }
+                    }
+                }
+            },
+            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        )
+        col.addView(row)
+
+        dialog.setContentView(col)
+        dialog.window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+        dialog.show()
+        dialog.window?.setLayout(
+            (resources.displayMetrics.widthPixels * 0.85f).toInt(),
+            WindowManager.LayoutParams.WRAP_CONTENT
+        )
+        dialog.window?.decorView?.layoutDirection = resources.configuration.layoutDirection
+    }
+
+    private fun promptText(title: String, initial: String, hint: String, onOk: (String) -> Unit) {
+        val dialog = Dialog(this)
+        val col = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = glassDrawable(26)
+            setPadding(dpx(20), dpx(20), dpx(20), dpx(18))
+        }
+        col.addView(titleText(title, 20f))
+        col.addView(spacer(12))
+        val input = EditText(this).apply {
+            setText(initial)
+            this.hint = hint
+            setSingleLine(true)
+            textSize = 15f
+            setTextColor(Palette.text)
+            setHintTextColor(Palette.textDim)
+            background = outlineDrawable(14)
+            setPadding(dpx(12), dpx(10), dpx(12), dpx(10))
+        }
+        col.addView(input)
+        col.addView(spacer(18))
+        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        row.addView(
+            actionButton(getString(R.string.confirm_delete_cancel), false) { dialog.dismiss() },
+            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        )
+        row.addView(View(this), LinearLayout.LayoutParams(dpx(10), 1))
+        row.addView(
+            actionButton(getString(R.string.action_ok), true) {
+                val value = input.text.toString().trim()
+                dialog.dismiss()
+                onOk(value)
+            },
+            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        )
+        col.addView(row)
+
+        dialog.setContentView(col)
+        dialog.window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+        dialog.show()
+        dialog.window?.setLayout(
+            (resources.displayMetrics.widthPixels * 0.85f).toInt(),
+            WindowManager.LayoutParams.WRAP_CONTENT
+        )
+        dialog.window?.decorView?.layoutDirection = resources.configuration.layoutDirection
+        input.requestFocus()
+    }
+
     private fun showSettingsDialog() {
         val dialog = Dialog(this)
         val scroll = ScrollView(this).apply { isFillViewport = true }
@@ -1928,8 +2564,11 @@ class MainActivity : ComponentActivity() {
         ))
         col.addView(hapticRow)
         col.addView(spacer(18))
-        val autoRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        autoRow.addView(accentText(getString(R.string.settings_auto_load_agent)))
+        val autoRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        autoRow.addView(accentText(getString(R.string.settings_auto_load_agent)), LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         var autoBtn: Button? = null
         autoBtn = actionButton(
             getString(if (prefs.autoLoadAgent) R.string.settings_auto_on else R.string.settings_auto_off),
@@ -1940,8 +2579,177 @@ class MainActivity : ComponentActivity() {
                 if (prefs.autoLoadAgent) R.string.settings_auto_on else R.string.settings_auto_off
             )
         }
-        autoRow.addView(autoBtn, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        autoRow.addView(autoBtn)
         col.addView(autoRow)
+        col.addView(spacer(18))
+
+        col.addView(View(this).apply {
+            setBackgroundColor(Color.parseColor(Palette.hairline))
+        }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dpx(1)))
+        col.addView(spacer(16))
+
+        col.addView(accentText(getString(R.string.settings_downloads)))
+        col.addView(spacer(8))
+        val pcInfo = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        pcInfo.addView(bodyText(getString(R.string.settings_parallel_connections), 13f))
+        pcInfo.addView(bodyText(getString(R.string.settings_parallel_connections_hint), 11f))
+        col.addView(pcInfo)
+        col.addView(spacer(8))
+        val pcRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val pcValue = TextView(this).apply {
+            text = prefs.parallelConnections.toString()
+            setTextColor(Palette.text)
+            textSize = 18f
+            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            gravity = Gravity.CENTER
+            setPadding(dpx(16), dpx(6), dpx(16), dpx(6))
+        }
+        fun pushConfig() {
+            if (!prefs.paired) return
+            io.execute {
+                runCatching {
+                    api.setConfig(
+                        prefs.parallelConnections,
+                        prefs.autoExtract,
+                        prefs.verifySha256,
+                        prefs.keepArchive
+                    )
+                }
+            }
+        }
+        fun syncConnections(v: Int) {
+            prefs.parallelConnections = v
+            pcValue.text = v.toString()
+            pushConfig()
+        }
+        val minus = actionButton("-", false) {
+            syncConnections((prefs.parallelConnections - 1).coerceAtLeast(1))
+        }
+        val plus = actionButton("+", false) {
+            syncConnections((prefs.parallelConnections + 1).coerceAtMost(64))
+        }
+        pcRow.addView(minus)
+        pcRow.addView(pcValue)
+        pcRow.addView(plus)
+        col.addView(pcRow)
+        col.addView(spacer(14))
+
+        fun addToggle(titleRes: Int, hintRes: Int, get: () -> Boolean, set: (Boolean) -> Unit) {
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            val info = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            info.addView(accentText(getString(titleRes)))
+            info.addView(bodyText(getString(hintRes), 11f))
+            row.addView(info, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            val sw = Switch(this).apply {
+                isChecked = get()
+                showText = false
+            }
+            fun tint() {
+                sw.thumbTintList = ColorStateList.valueOf(
+                    if (sw.isChecked) Palette.neon else Palette.textDim
+                )
+                sw.trackTintList = ColorStateList.valueOf(
+                    if (sw.isChecked) Color.parseColor(if (Palette.dark) "#5522D3FF" else "#33007C9E")
+                    else Color.parseColor(Palette.chipFill)
+                )
+            }
+            tint()
+            sw.setOnCheckedChangeListener { _, checked ->
+                set(checked)
+                tint()
+                pushConfig()
+            }
+            row.addView(sw)
+            col.addView(row)
+            col.addView(spacer(12))
+        }
+
+        addToggle(
+            R.string.settings_auto_extract, R.string.settings_auto_extract_hint,
+            { prefs.autoExtract }, { prefs.autoExtract = it }
+        )
+        addToggle(
+            R.string.settings_verify_sha256, R.string.settings_verify_sha256_hint,
+            { prefs.verifySha256 }, { prefs.verifySha256 = it }
+        )
+        addToggle(
+            R.string.settings_keep_archive, R.string.settings_keep_archive_hint,
+            { prefs.keepArchive }, { prefs.keepArchive = it }
+        )
+
+        if (prefs.paired) {
+            io.execute {
+                val r = api.getConfig()
+                val j = r.json()
+                val remote = j?.optInt("parallelConnections", 0) ?: 0
+                val ra = j?.optInt("autoExtract", -1) ?: -1
+                val rv = j?.optInt("verifySha256", -1) ?: -1
+                val rk = j?.optInt("keepArchive", -1) ?: -1
+                if (r.ok && j != null) {
+                    val changed =
+                        (remote in 1..64 && remote != prefs.parallelConnections) ||
+                        (ra in 0..1 && (ra == 1) != prefs.autoExtract) ||
+                        (rv in 0..1 && (rv == 1) != prefs.verifySha256) ||
+                        (rk in 0..1 && (rk == 1) != prefs.keepArchive)
+                    runOnUiThread {
+                        if (remote in 1..64) {
+                            prefs.parallelConnections = remote
+                            pcValue.text = remote.toString()
+                        }
+                        if (ra in 0..1) prefs.autoExtract = ra == 1
+                        if (rv in 0..1) prefs.verifySha256 = rv == 1
+                        if (rk in 0..1) prefs.keepArchive = rk == 1
+                        if (changed) {
+                            dialog.dismiss()
+                            showSettingsDialog()
+                        }
+                    }
+                } else if (prefs.paired) {
+                    pushConfig()
+                }
+            }
+        }
+
+        col.addView(spacer(18))
+        col.addView(accentText(getString(R.string.settings_default_storage)))
+        val defInfo = bodyText(getString(R.string.settings_default_storage_hint), 11f)
+        col.addView(defInfo)
+        col.addView(spacer(8))
+        val defRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        col.addView(defRow)
+        if (prefs.paired) {
+            io.execute {
+                val list = Ps5Client.parseStorage(api.storage())
+                runOnUiThread {
+                    defRow.removeAllViews()
+                    if (list.isEmpty()) {
+                        defInfo.text = getString(R.string.storage_error)
+                        return@runOnUiThread
+                    }
+                    val current = list.firstOrNull { it.id == prefs.storageId }
+                    if (current != null) {
+                        defInfo.text = getString(R.string.settings_default_storage_value, current.label)
+                    }
+                    for ((idx, s) in list.withIndex()) {
+                        if (idx > 0) defRow.addView(View(this), LinearLayout.LayoutParams(dpx(8), 1))
+                        defRow.addView(
+                            actionButton(s.label, s.id == prefs.storageId) {
+                                prefs.storageId = s.id
+                                dialog.dismiss()
+                                showSettingsDialog()
+                            },
+                            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                        )
+                    }
+                }
+            }
+        }
         col.addView(spacer(18))
         col.addView(actionButton(getString(R.string.close), false) { dialog.dismiss() })
 
@@ -2633,7 +3441,7 @@ class MainActivity : ComponentActivity() {
                 scaleType = ImageView.ScaleType.CENTER_CROP
                 clipToOutline = true
                 background = glassDrawable(12, Palette.coverTop, Palette.coverBottom, mid = Palette.coverMid)
-                if (game.cover.startsWith("http")) load(game.cover) { crossfade(true) }
+                if (game.cover.startsWith("http")) loadCover(game.cover)
             }
             row.addView(
                 cover,

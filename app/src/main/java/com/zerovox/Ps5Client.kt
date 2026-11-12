@@ -1,4 +1,4 @@
-package com.orbit.zero
+package com.zerovox
 
 import android.content.Context
 import okhttp3.MediaType.Companion.toMediaType
@@ -43,6 +43,9 @@ class Ps5Client(private val prefs: Prefs) {
 
     private fun url(path: String) = prefs.baseUrl + path
 
+    private fun enc(value: String): String =
+        java.net.URLEncoder.encode(value, "UTF-8")
+
     internal fun call(
         method: String,
         path: String,
@@ -83,6 +86,23 @@ class Ps5Client(private val prefs: Prefs) {
 
     fun storage(): Resp = call("GET", "/api/v1/storage")
 
+    fun getConfig(): Resp = call("GET", "/api/v1/config")
+
+    fun setConfig(
+        parallelConnections: Int,
+        autoExtract: Boolean = true,
+        verifySha256: Boolean = true,
+        keepArchive: Boolean = true,
+    ): Resp =
+        call(
+            "POST", "/api/v1/config",
+            JSONObject()
+                .put("parallelConnections", parallelConnections)
+                .put("autoExtract", if (autoExtract) 1 else 0)
+                .put("verifySha256", if (verifySha256) 1 else 0)
+                .put("keepArchive", if (keepArchive) 1 else 0)
+        )
+
     fun downloads(): Resp = call("GET", "/api/v1/downloads")
 
     fun installations(): Resp = call("GET", "/api/v1/installations")
@@ -116,6 +136,36 @@ class Ps5Client(private val prefs: Prefs) {
 
     fun jobAction(jobId: String, action: String, body: JSONObject = JSONObject()): Resp =
         call("POST", "/api/v1/downloads/$jobId/$action", body)
+
+    fun clearFinishedDownloads(): Resp =
+        call("POST", "/api/v1/downloads/clear-finished")
+
+    fun files(storage: String, path: String): Resp =
+        call(
+            "GET",
+            "/api/v1/files?storage=${enc(storage)}&path=${enc(path)}"
+        )
+
+    fun fileAction(
+        storage: String,
+        action: String,
+        path: String,
+        name: String = "",
+        target: String = "",
+        targetStorage: String = "",
+    ): Resp =
+        call(
+            "POST", "/api/v1/files",
+            JSONObject()
+                .put("storage", storage)
+                .put("action", action)
+                .put("path", path)
+                .put("name", name)
+                .put("target", target)
+                .put("targetStorage", targetStorage)
+        )
+
+    fun library(): Resp = call("GET", "/api/v1/library")
 
     fun receiveStatus(): Resp = call("GET", "/api/v1/receive")
 
@@ -154,6 +204,24 @@ class Ps5Client(private val prefs: Prefs) {
             val b = ByteArray(bytes)
             java.security.SecureRandom().nextBytes(b)
             return b.joinToString("") { "%02x".format(it) }
+        }
+
+        fun parseFiles(resp: Resp): List<FileEntry> {
+            val root = resp.json() ?: return emptyList()
+            val a = root.optJSONArray("entries") ?: return emptyList()
+            val out = ArrayList<FileEntry>(a.length())
+            for (i in 0 until a.length()) {
+                val o = a.optJSONObject(i) ?: continue
+                out.add(
+                    FileEntry(
+                        name = o.optString("name"),
+                        dir = o.optBoolean("dir"),
+                        size = o.optLong("size"),
+                        mtime = o.optLong("mtime"),
+                    )
+                )
+            }
+            return out
         }
 
         fun parseStorage(resp: Resp): List<Storage> {
@@ -205,6 +273,23 @@ class Ps5Client(private val prefs: Prefs) {
                         state = o.optString("state"),
                         message = o.optString("message"),
                         packages = parsePackages(o),
+                    )
+                )
+            }
+            return out
+        }
+
+        fun parseLibrary(resp: Resp): List<LibraryGame> {
+            val a = resp.jsonArray() ?: return emptyList()
+            val out = ArrayList<LibraryGame>(a.length())
+            for (i in 0 until a.length()) {
+                val o = a.optJSONObject(i) ?: continue
+                out.add(
+                    LibraryGame(
+                        contentId = o.optString("contentId"),
+                        title = o.optString("title").ifBlank { o.optString("contentId") },
+                        titleId = o.optString("titleId"),
+                        sizeBytes = o.optLong("sizeBytes", 0L)
                     )
                 )
             }
@@ -268,6 +353,7 @@ class Ps5Client(private val prefs: Prefs) {
             "downloading" -> context.getString(R.string.job_status_downloading)
             "retrying" -> context.getString(R.string.job_status_retrying)
             "verifying" -> context.getString(R.string.job_status_verifying)
+            "finalizing" -> context.getString(R.string.job_status_finalizing)
             "waiting-extraction" -> context.getString(R.string.job_status_waiting_extraction)
             "inspecting" -> context.getString(R.string.job_status_inspecting)
             "extracting" -> context.getString(R.string.job_status_extracting)

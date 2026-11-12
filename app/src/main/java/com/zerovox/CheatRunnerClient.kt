@@ -1,4 +1,4 @@
-package com.orbit.zero
+package com.zerovox
 
 import okhttp3.OkHttpClient
 import okhttp3.Request

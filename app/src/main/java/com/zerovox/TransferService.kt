@@ -1,4 +1,4 @@
-package com.orbit.zero
+package com.zerovox
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -23,7 +23,7 @@ import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 
 class TransferService : Service() {
-    private val channelId = "orbit_transfer"
+    private val channelId = "zerovox_transfer"
     private var worker: Thread? = null
 
     companion object {
@@ -38,6 +38,7 @@ class TransferService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        TransferStore.init(this)
         createChannel()
     }
 
@@ -56,12 +57,26 @@ class TransferService : Service() {
         val sha256 = intent.getStringExtra("sha256") ?: ""
         val cookie = intent.getStringExtra("cookie") ?: ""
         val userAgent = intent.getStringExtra("userAgent") ?: ""
+        val origin = intent.getStringExtra("origin") ?: ""
+        val resume = intent.getBooleanExtra("resume", false)
 
         if (worker?.isAlive == true) return START_NOT_STICKY
         startForeground(77, notification(title, getString(R.string.notif_preparing), 0))
-        TransferStore.reset(title, filename, size)
 
         if (mode == "local") {
+            if (!resume) {
+                TransferStore.reset(title, filename, size)
+            } else {
+                TransferStore.pauseRequested = false
+                TransferStore.cancelRequested = false
+            }
+            TransferStore.update(
+                mode = "local",
+                url = url,
+                filename = filename,
+                title = title,
+            )
+            TransferStore.persistNow()
             if (url.isBlank()) {
                 fail(getString(R.string.err_missing_url_storage))
                 stopForeground(STOP_FOREGROUND_DETACH)
@@ -69,10 +84,13 @@ class TransferService : Service() {
                 return START_NOT_STICKY
             }
             worker = Thread {
-                runLocalDownload(title, url, filename, size, sha256, cookie, userAgent)
+                runLocalDownload(title, url, filename, size, sha256, cookie, userAgent, origin, resume)
             }.also { it.start() }
             return START_NOT_STICKY
         }
+
+        TransferStore.reset(title, filename, size)
+        TransferStore.update(mode = mode)
 
         if (mode == "send") {
             val uri = intent.getStringExtra("uri") ?: ""
@@ -472,30 +490,38 @@ class TransferService : Service() {
         sha256: String,
         cookie: String,
         userAgent: String,
+        originOverride: String = "",
+        resume: Boolean = false,
     ) {
         val safeName = safeFilename(filename, title)
         var dest: Destination? = null
+        var completed = false
         try {
             val client = OkHttpClient.Builder()
                 .connectTimeout(20, TimeUnit.SECONDS)
                 .readTimeout(120, TimeUnit.SECONDS)
                 .retryOnConnectionFailure(true)
                 .build()
-            val origin = runCatching {
-                val u = java.net.URI(url)
-                "${u.scheme}://${u.host}/"
-            }.getOrNull()
+            val origin = originOverride.ifBlank {
+                runCatching {
+                    val u = java.net.URI(url)
+                    "${u.scheme}://${u.host}/"
+                }.getOrNull().orEmpty()
+            }
+            val cur = TransferStore.current
+            var resumeOffset = if (resume && cur.uri.isNotBlank()) cur.received else 0L
+            if (resumeOffset < 0) resumeOffset = 0
             val requestBuilder = Request.Builder()
                 .url(url)
                 .header("Accept-Encoding", "identity")
                 .header("User-Agent", userAgent.ifBlank { BROWSER_UA })
                 .header("Accept", "*/*")
+            if (resumeOffset > 0) requestBuilder.header("Range", "bytes=$resumeOffset-")
             if (!origin.isNullOrBlank()) requestBuilder.header("Referer", origin)
             if (cookie.isNotBlank()) requestBuilder.header("Cookie", cookie)
-            val request = requestBuilder.get().build()
 
-            client.newCall(request).execute().use { response ->
-                if (response.code !in 200..299) {
+            client.newCall(requestBuilder.get().build()).execute().use { response ->
+                if (response.code !in listOf(200, 206)) {
                     throw RuntimeException(getString(R.string.err_source_http, response.code))
                 }
                 val type = response.header("Content-Type") ?: ""
@@ -503,28 +529,65 @@ class TransferService : Service() {
                     throw RuntimeException(getString(R.string.err_html))
                 }
                 val body = response.body ?: throw RuntimeException(getString(R.string.err_empty_body))
-                var total = body.contentLength().takeIf { it > 0 } ?: size
-                if (total < 0) total = 0L
 
-                val created = openDestination(safeName)
-                dest = created
-                TransferStore.reset(title, safeName, total)
-                TransferStore.update(state = "downloading")
-                notify(title, getString(R.string.notif_downloading), 0)
-
-                val digest = MessageDigest.getInstance("SHA-256")
-                val input = body.byteStream()
                 var offset = 0L
+                var total = if (size > 0) size else 0L
+                if (response.code == 206) {
+                    val cr = response.header("Content-Range") ?: ""
+                    val t = cr.substringAfter('/').trim().toLongOrNull()
+                    if (t != null && t > 0) total = t
+                    val start = cr.substringAfter("bytes ").substringBefore('-').trim().toLongOrNull() ?: 0L
+                    offset = start
+                    dest = openExistingDestination(cur.uri, cur.path, safeName)
+                } else {
+                    // Server ignored Range; start fresh.
+                    resumeOffset = 0
+                    offset = 0
+                    val bl = body.contentLength()
+                    if (bl > 0) total = bl
+                    dest = openDestination(safeName)
+                }
+                val created = dest!!
+
+                if (!resume || resumeOffset == 0L) {
+                    TransferStore.update(
+                        state = "downloading",
+                        received = offset,
+                        total = if (total > 0) total else TransferStore.current.total,
+                        speed = 0.0,
+                        uri = created.uri?.toString() ?: created.file?.let { Uri.fromFile(it).toString() }.orEmpty(),
+                        path = created.displayPath,
+                        url = url, cookie = cookie, userAgent = userAgent,
+                        origin = originOverride, sha256 = sha256,
+                        title = title, filename = safeName,
+                        mode = "local",
+                    )
+                } else {
+                    TransferStore.update(
+                        state = "downloading",
+                        received = offset,
+                        total = if (total > 0) total else TransferStore.current.total,
+                        speed = 0.0,
+                        uri = created.uri?.toString() ?: created.file?.let { Uri.fromFile(it).toString() }.orEmpty(),
+                        path = created.displayPath,
+                        mode = "local",
+                    )
+                }
+                notify(title, getString(R.string.notif_downloading), if (total > 0) progress(offset, total) else 0)
+
+                val digest = if (offset == 0L) MessageDigest.getInstance("SHA-256") else null
+                val input = body.byteStream()
                 val buffer = ByteArray(256 * 1024)
                 var lastReport = System.currentTimeMillis()
-                var lastBytes = 0L
+                var lastBytes = offset
                 while (true) {
                     if (TransferStore.cancelRequested) throw CancelledException()
+                    if (TransferStore.pauseRequested) throw PausedException(offset)
                     val n = input.read(buffer)
                     if (n < 0) break
                     if (n == 0) continue
                     created.stream.write(buffer, 0, n)
-                    digest.update(buffer, 0, n)
+                    if (digest != null) digest.update(buffer, 0, n)
                     offset += n
                     val now = System.currentTimeMillis()
                     if (now - lastReport >= 700) {
@@ -553,12 +616,18 @@ class TransferService : Service() {
                         )
                     )
                 }
-                val hash = digest.digest().joinToString("") { "%02x".format(it) }
-                if (sha256.isNotBlank() && !hash.equals(sha256, ignoreCase = true)) {
-                    throw RuntimeException(getString(R.string.err_verify_failed))
+                if (sha256.isNotBlank()) {
+                    if (digest == null) {
+                        throw RuntimeException(getString(R.string.err_verify_failed))
+                    }
+                    val hash = digest.digest().joinToString("") { "%02x".format(it) }
+                    if (!hash.equals(sha256, ignoreCase = true)) {
+                        throw RuntimeException(getString(R.string.err_verify_failed))
+                    }
                 }
                 finalizeDestination(created)
                 dest = null
+                completed = true
                 val savedUri = created.uri?.toString()
                     ?: created.file?.let { Uri.fromFile(it).toString() }.orEmpty()
                 TransferStore.update(
@@ -571,6 +640,18 @@ class TransferService : Service() {
                 )
                 notify(title, getString(R.string.notif_complete), 100)
             }
+        } catch (_: PausedException) {
+            runCatching { dest?.stream?.flush() }
+            runCatching { dest?.stream?.close() }
+            val d = dest
+            TransferStore.update(
+                state = "paused",
+                speed = 0.0,
+                uri = d?.uri?.toString() ?: d?.file?.let { Uri.fromFile(it).toString() } ?: TransferStore.current.uri,
+                path = d?.displayPath ?: TransferStore.current.path,
+                message = "",
+            )
+            notify(title, getString(R.string.state_paused), progress(TransferStore.current.received, TransferStore.current.total))
         } catch (_: CancelledException) {
             runCatching { dest?.stream?.close() }
             dest?.let { deleteDestination(it) }
@@ -578,7 +659,7 @@ class TransferService : Service() {
             notify(title, getString(R.string.notif_cancelled), 0)
         } catch (e: Exception) {
             runCatching { dest?.stream?.close() }
-            dest?.let { deleteDestination(it) }
+            if (!completed) dest?.let { deleteDestination(it) }
             fail(e.message ?: getString(R.string.err_transfer_failed))
         } finally {
             stopForeground(STOP_FOREGROUND_DETACH)
@@ -592,6 +673,19 @@ class TransferService : Service() {
         val file: File?,
         val displayPath: String,
     )
+
+    private fun openExistingDestination(uriString: String, path: String, name: String): Destination {
+        val uri = runCatching { Uri.parse(uriString) }.getOrNull()
+        if (uri != null && uriString.startsWith("content:")) {
+            val stream = contentResolver.openOutputStream(uri, "wa")
+                ?: throw RuntimeException(getString(R.string.err_transfer_failed))
+            return Destination(stream, uri, null, path.ifBlank { "Download/ZeroVox/$name" })
+        }
+        val file = uri?.path?.let { File(it) } ?: File(path.ifBlank { name })
+        val parent = file.parentFile
+        if (parent != null && !parent.exists()) parent.mkdirs()
+        return Destination(FileOutputStream(file, true), null, file, file.absolutePath)
+    }
 
     private fun openDestination(name: String): Destination {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -752,11 +846,11 @@ class TransferService : Service() {
     }
 
     override fun onDestroy() {
-        TransferStore.cancelRequested = true
         super.onDestroy()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     private class CancelledException : Exception()
+    private class PausedException(val offset: Long) : Exception()
 }

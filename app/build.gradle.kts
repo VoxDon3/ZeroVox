@@ -14,15 +14,15 @@ val keystoreProperties = Properties().apply {
 val hasReleaseSigning = keystorePropertiesFile.exists()
 
 android {
-    namespace = "com.orbit.zero"
+    namespace = "com.zerovox"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.orbit.zero"
+        applicationId = "com.zerovox"
         minSdk = 26
         targetSdk = 36
-        versionCode = 105
-        versionName = "1.0.1"
+        versionCode = 138
+        versionName = "1.0.34"
     }
 
     bundle {

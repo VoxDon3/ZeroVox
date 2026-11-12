@@ -1,4 +1,4 @@
-package com.orbit.zero
+package com.zerovox
 
 import android.app.DownloadManager
 import android.content.ContentUris

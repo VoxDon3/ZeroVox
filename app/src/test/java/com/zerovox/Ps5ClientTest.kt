@@ -1,4 +1,4 @@
-package com.orbit.zero
+package com.zerovox
 
 import org.json.JSONArray
 import org.json.JSONObject

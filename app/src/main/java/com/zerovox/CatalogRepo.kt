@@ -1,6 +1,7 @@
-package com.orbit.zero
+package com.zerovox
 
 import android.content.Context
+import android.util.Log
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONArray
@@ -16,6 +17,7 @@ data class Catalog(
     val name: String,
     val feedUrl: String,
     val keyHex: String,
+    val mirrors: List<String> = emptyList(),
 ) {
     private val key: ByteArray
         get() = keyHex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
@@ -47,18 +49,48 @@ object CatalogRepo {
             name = "Orbit",
             feedUrl = "https://raw.githubusercontent.com/saawant12/orbit-store-ps5/main/catalogue-v8.enc",
             keyHex = "2143263b716b06ec565d047a8c370da7e5d9690975748e836ed92c664341f6ac",
+            mirrors = listOf(
+                "https://cdn.jsdelivr.net/gh/saawant12/orbit-store-ps5@main/catalogue-v8.enc",
+            ),
         ),
         Catalog(
             id = "dlpsgame",
             name = "DLPSGame",
             feedUrl = "https://raw.githubusercontent.com/OptiTronOffical/OptiStore/main/dlps.json",
             keyHex = "",
+            mirrors = listOf(
+                "https://cdn.jsdelivr.net/gh/OptiTronOffical/OptiStore@main/dlps.json",
+            ),
         ),
         Catalog(
             id = "pippo",
             name = "Pippo",
             feedUrl = "https://raw.githubusercontent.com/OptiTronOffical/OptiStore/main/pippo.json",
             keyHex = "",
+            mirrors = listOf(
+                "https://cdn.jsdelivr.net/gh/OptiTronOffical/OptiStore@main/pippo.json",
+            ),
+        ),
+        Catalog(
+            id = "pfs",
+            name = "PFS",
+            feedUrl = "https://pegasus-dl.dev/catalogs/pfs.json",
+            keyHex = "",
+        ),
+        Catalog(
+            id = "zer0",
+            name = "Zer0",
+            feedUrl = "https://pegasus-dl.dev/catalogs/zer0.json",
+            keyHex = "",
+        ),
+        Catalog(
+            id = "evox",
+            name = "evoX",
+            feedUrl = "https://raw.githubusercontent.com/nexgen999/evoX-CoreOS/refs/heads/main/json/pegasus-dl/catalog.json",
+            keyHex = "",
+            mirrors = listOf(
+                "https://cdn.jsdelivr.net/gh/nexgen999/evoX-CoreOS@main/json/pegasus-dl/catalog.json",
+            ),
         ),
     )
 
@@ -68,6 +100,10 @@ object CatalogRepo {
 
     @Volatile
     var games: List<Game> = emptyList()
+        private set
+
+    @Volatile
+    var homebrewGames: List<Game> = emptyList()
         private set
 
     @Volatile
@@ -82,61 +118,103 @@ object CatalogRepo {
     private var sizeIndex: Map<String, Long>? = null
 
     private val http = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(90, TimeUnit.SECONDS)
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(45, TimeUnit.SECONDS)
+        .callTimeout(90, TimeUnit.SECONDS)
         .build()
 
     fun currentCatalog(): Catalog = catalogs.firstOrNull { it.id == currentCatalogId } ?: catalogs.first()
 
     fun setCurrentCatalog(id: String) {
+        if (catalogs.none { it.id == id }) return
+        if (currentCatalogId == id) return
         currentCatalogId = id
+        games = emptyList()
+        revision = 0
+        lastError = null
     }
 
-    fun load(context: Context, force: Boolean, catalogId: String = currentCatalogId): Boolean {
+    fun load(
+        context: Context,
+        force: Boolean,
+        catalogId: String = currentCatalogId,
+        onUpdate: (() -> Unit)? = null,
+    ): Boolean = loadInternal(context, force, catalogId, homebrew = false, onUpdate)
+
+    fun loadHomebrew(
+        context: Context,
+        force: Boolean = false,
+        onUpdate: (() -> Unit)? = null,
+    ): Boolean = loadInternal(context, force, "evox", homebrew = true, onUpdate)
+
+    private fun loadInternal(
+        context: Context,
+        force: Boolean,
+        catalogId: String,
+        homebrew: Boolean,
+        onUpdate: (() -> Unit)?,
+    ): Boolean {
         val catalog = catalogs.firstOrNull { it.id == catalogId } ?: return false
         lastError = null
         val cache = cacheFile(context, catalog.id)
-        val fresh = cache.exists() &&
-            System.currentTimeMillis() - cache.lastModified() < CACHE_MS
 
-        if (!force && fresh) {
-            return try {
-                parse(context, cache.readText(), catalog)
-                true
+        var cached = false
+        if (cache.exists()) {
+            try {
+                parse(context, cache.readText(), catalog, homebrew)
+                cached = true
+                onUpdate?.invoke()
             } catch (_: Exception) {
-                false
             }
         }
+        val fresh = cached &&
+            System.currentTimeMillis() - cache.lastModified() < CACHE_MS
+        if (!force && fresh) return true
 
-        try {
-            val request = Request.Builder().url(catalog.feedUrl).get().build()
-            http.newCall(request).execute().use { r ->
-                if (!r.isSuccessful) throw RuntimeException("HTTP ${r.code}")
-                val bytes = r.body!!.bytes()
-                val plain = if (String(bytes, 0, 8, Charsets.US_ASCII) == "ORBITENC") {
-                    catalog.decrypt(bytes)
-                } else {
-                    String(bytes, Charsets.UTF_8)
+        var lastException: Exception? = null
+        for (url in listOf(catalog.feedUrl) + catalog.mirrors) {
+            try {
+                val request = Request.Builder().url(url).get().build()
+                http.newCall(request).execute().use { r ->
+                    if (!r.isSuccessful) throw RuntimeException("HTTP ${r.code}")
+                    val bytes = r.body!!.bytes()
+                    val plain = if (bytes.size >= 8 &&
+                        String(bytes, 0, 8, Charsets.US_ASCII) == "ORBITENC"
+                    ) {
+                        catalog.decrypt(bytes)
+                    } else {
+                        String(bytes, Charsets.UTF_8)
+                    }
+                    val started = System.currentTimeMillis()
+                    parse(context, plain, catalog, homebrew)
+                    cache.writeText(plain)
+                    onUpdate?.invoke()
+                    val count = if (homebrew) homebrewGames.size else games.size
+                    Log.i(
+                        "CatalogRepo",
+                        "${catalog.id} loaded from $url in ${System.currentTimeMillis() - started}ms " +
+                            "(${bytes.size} bytes, $count games)"
+                    )
                 }
-                cache.writeText(plain)
-                parse(context, plain, catalog)
+                return true
+            } catch (e: Exception) {
+                Log.w("CatalogRepo", "${catalog.id} feed failed: $url", e)
+                lastException = e
             }
-            return true
-        } catch (e: Exception) {
-            lastError = e.message ?: context.getString(R.string.catalog_err_update)
-            if (cache.exists()) {
-                return try {
-                    parse(context, cache.readText(), catalog)
-                    true
-                } catch (_: Exception) {
-                    false
-                }
-            }
-            return false
         }
+        lastError = lastException?.message ?: context.getString(R.string.catalog_err_update)
+        return cached
     }
 
     private fun cacheFile(context: Context, catalogId: String) = File(context.filesDir, "catalog-$catalogId.json")
+
+    private fun safeUrl(url: String): String {
+        val trimmed = url.trim()
+        if (trimmed.contains("evoX-CoreOS") && trimmed.contains("/assets/icon/")) {
+            return trimmed.replace(" ", "")
+        }
+        return trimmed.replace(" ", "%20")
+    }
 
     private fun sizeIndex(context: Context): Map<String, Long> {
         sizeIndex?.let { return it }
@@ -156,16 +234,16 @@ object CatalogRepo {
         return map
     }
 
-    private fun parse(context: Context, plain: String, catalog: Catalog) {
+    private fun parse(context: Context, plain: String, catalog: Catalog, homebrew: Boolean = false) {
         val root = JSONObject(plain)
-        revision = if (root.has("releases")) root.optInt("revision", 0) else root.optInt("version", 1)
+        val rev = if (root.has("releases")) root.optInt("revision", 0) else root.optInt("version", 1)
         when {
-            root.has("releases") -> parseOrbitReleases(context, root)
-            root.has("packages") -> parsePackages(context, root, catalog)
+            root.has("releases") -> parseReleases(context, root, catalog, rev, homebrew)
+            root.has("packages") -> parsePackages(context, root, catalog, rev, homebrew)
         }
     }
 
-    private fun parseOrbitReleases(context: Context, root: JSONObject) {
+    private fun parseReleases(context: Context, root: JSONObject, catalog: Catalog, rev: Int, homebrew: Boolean = false) {
         val arr = root.optJSONArray("releases") ?: throw RuntimeException(context.getString(R.string.catalog_err_no_games))
         val grouped = LinkedHashMap<String, MutableList<GameOption>>()
         val meta = HashMap<String, JSONObject>()
@@ -226,18 +304,25 @@ object CatalogRepo {
                     platform = options.first().platform,
                     genre = o.optString("genre"),
                     region = o.optString("region"),
-                    cover = o.optString("cover").ifBlank {
-                        o.optString("posterUrl").ifBlank { o.optString("originalPosterUrl") }
-                    },
+                    cover = safeUrl(
+                        o.optString("cover").ifBlank {
+                            o.optString("posterUrl").ifBlank { o.optString("originalPosterUrl") }
+                        }
+                    ),
                     options = sorted,
                 )
             )
         }
         list.sortBy { it.title.lowercase() }
-        games = list
+        if (homebrew) {
+            homebrewGames = list
+        } else if (catalog.id == currentCatalogId) {
+            revision = rev
+            games = list
+        }
     }
 
-    private fun parsePackages(context: Context, root: JSONObject, catalog: Catalog) {
+    private fun parsePackages(context: Context, root: JSONObject, catalog: Catalog, rev: Int, homebrew: Boolean = false) {
         val arr = root.optJSONArray("packages") ?: throw RuntimeException(context.getString(R.string.catalog_err_no_games))
         val grouped = LinkedHashMap<String, MutableList<GameOption>>()
         val meta = HashMap<String, JSONObject>()
@@ -277,7 +362,7 @@ object CatalogRepo {
                     source = o.optString("downloadSource"),
                     provider = o.optString("downloadSource"),
                     sizeBytes = sizeBytes,
-                    filename = linkName,
+                    filename = o.optString("filename").ifBlank { linkName },
                     url = url,
                     browserUrl = url,
                     sha256 = l.optString("sha256"),
@@ -306,14 +391,21 @@ object CatalogRepo {
                     platform = options.first().platform,
                     genre = o.optString("genre"),
                     region = o.optString("region"),
-                    cover = o.optString("cover").ifBlank {
-                        o.optString("posterUrl").ifBlank { o.optString("originalPosterUrl") }
-                    },
+                    cover = safeUrl(
+                        o.optString("cover").ifBlank {
+                            o.optString("posterUrl").ifBlank { o.optString("originalPosterUrl") }
+                        }
+                    ),
                     options = sorted,
                 )
             )
         }
         list.sortBy { it.title.lowercase() }
-        games = list
+        if (homebrew) {
+            homebrewGames = list
+        } else if (catalog.id == currentCatalogId) {
+            revision = rev
+            games = list
+        }
     }
 }

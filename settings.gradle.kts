@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "OrbitZeroAndroid"
+rootProject.name = "ZeroVoxAndroid"
 include(":app")

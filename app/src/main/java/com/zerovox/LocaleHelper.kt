@@ -1,4 +1,4 @@
-package com.orbit.zero
+package com.zerovox
 
 import android.content.Context
 import android.content.res.Configuration
@@ -16,7 +16,7 @@ object LocaleHelper {
     )
 
     fun currentTag(context: Context): String {
-        val saved = context.getSharedPreferences("orbit_zero", Context.MODE_PRIVATE)
+        val saved = context.getSharedPreferences("zerovox_prefs", Context.MODE_PRIVATE)
             .getString("language", "en")
         return if (saved in languages) saved.orEmpty() else "en"
     }
