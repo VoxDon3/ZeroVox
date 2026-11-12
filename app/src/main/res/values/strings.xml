@@ -100,6 +100,8 @@
     <string name="no_phone_transfer">No phone transfer right now. Pick a game and choose “Phone”.</string>
     <string name="state_preparing">Preparing…</string>
     <string name="state_downloading">Downloading and sending</string>
+    <string name="state_downloading_phone">Downloading to phone</string>
+    <string name="state_downloading_send">Downloading and sending</string>
     <string name="state_verifying">Verifying on PS5</string>
     <string name="state_sent">Sent; PS5 is still verifying</string>
     <string name="state_complete">Transfer complete</string>
@@ -187,6 +189,7 @@
     <string name="err_empty_body">The source returned an empty response.</string>
     <string name="err_unknown_size">The file size is unknown from the source.</string>
     <string name="notif_downloading">Downloading and sending to PS5…</string>
+    <string name="notif_downloading_phone">Downloading to phone…</string>
     <string name="err_incomplete_source">The source ended before the file was complete (%1$s of %2$s).</string>
     <string name="notif_verifying">Verifying on PS5…</string>
     <string name="notif_complete">Transfer complete on PS5</string>

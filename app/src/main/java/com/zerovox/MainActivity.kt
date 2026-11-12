@@ -1109,7 +1109,11 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun applyCatalogFilter() {
-        val all = CatalogRepo.games
+        val base = CatalogRepo.games
+        val supplement = if (CatalogRepo.currentCatalogId != "orbit" &&
+            CatalogRepo.currentCatalogId != "blackbox"
+        ) CatalogRepo.ps4Supplement else emptyList()
+        val all = if (supplement.isEmpty()) base else (base + supplement).distinctBy { it.key }
         val q = query.trim().lowercase()
         val filtered = all.asSequence()
             .filter { platform == "all" || it.platform == platform }
@@ -1150,6 +1154,14 @@ class MainActivity : ComponentActivity() {
                     ) {
                         applyCatalogFilter()
                     }
+                }
+            }
+            CatalogRepo.loadPs4Supplement(this@MainActivity)
+            runOnUiThread {
+                if (token == catalogLoadToken && tab == "catalog" &&
+                    CatalogRepo.currentCatalogId == catalogId
+                ) {
+                    applyCatalogFilter()
                 }
             }
             runOnUiThread {
@@ -1885,7 +1897,10 @@ class MainActivity : ComponentActivity() {
         body.addView(top)
         val stateLabel = when (t.state) {
             "preparing" -> getString(R.string.state_preparing)
-            "downloading" -> getString(R.string.state_downloading)
+            "downloading" -> getString(
+                if (t.mode == "local") R.string.state_downloading_phone
+                else R.string.state_downloading_send
+            )
             "verifying" -> getString(R.string.state_verifying)
             "sent" -> getString(R.string.state_sent)
             "complete" -> getString(R.string.state_complete)

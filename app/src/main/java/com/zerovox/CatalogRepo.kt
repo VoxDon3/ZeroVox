@@ -18,6 +18,7 @@ data class Catalog(
     val feedUrl: String,
     val keyHex: String,
     val mirrors: List<String> = emptyList(),
+    val assetName: String = "",
 ) {
     private val key: ByteArray
         get() = keyHex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
@@ -92,6 +93,13 @@ object CatalogRepo {
                 "https://cdn.jsdelivr.net/gh/nexgen999/evoX-CoreOS@main/json/pegasus-dl/catalog.json",
             ),
         ),
+        Catalog(
+            id = "blackbox",
+            name = "Blackbox",
+            feedUrl = "",
+            keyHex = "",
+            assetName = "blackbox.json",
+        ),
     )
 
     @Volatile
@@ -100,6 +108,10 @@ object CatalogRepo {
 
     @Volatile
     var games: List<Game> = emptyList()
+        private set
+
+    @Volatile
+    var ps4Supplement: List<Game> = emptyList()
         private set
 
     @Volatile
@@ -157,6 +169,19 @@ object CatalogRepo {
         val catalog = catalogs.firstOrNull { it.id == catalogId } ?: return false
         lastError = null
         val cache = cacheFile(context, catalog.id)
+
+        if (catalog.assetName.isNotBlank()) {
+            try {
+                val plain = context.assets.open(catalog.assetName).bufferedReader().use { it.readText() }
+                parse(context, plain, catalog, homebrew)
+                cache.writeText(plain)
+                onUpdate?.invoke()
+                return true
+            } catch (e: Exception) {
+                lastError = e.message ?: context.getString(R.string.catalog_err_update)
+                return false
+            }
+        }
 
         var cached = false
         if (cache.exists()) {
@@ -250,6 +275,89 @@ object CatalogRepo {
             }
         }
         return ""
+    }
+
+    /**
+     * Built-in PS5 feeds contain no PS4 titles. The Orbit feed is the only
+     * built-in source that already carries PS4 games, so reuse its cached
+     * releases as a supplement for the other catalogues.
+     */
+    fun loadPs4Supplement(context: Context) {
+        val file = cacheFile(context, "orbit")
+        if (!file.exists()) {
+            ps4Supplement = emptyList()
+            return
+        }
+        val raw = runCatching { file.readText() }.getOrNull() ?: return
+        val root = runCatching { JSONObject(raw) }.getOrNull() ?: return
+        val arr = root.optJSONArray("releases") ?: run {
+            ps4Supplement = emptyList()
+            return
+        }
+        val grouped = LinkedHashMap<String, MutableList<GameOption>>()
+        val meta = HashMap<String, JSONObject>()
+        for (i in 0 until arr.length()) {
+            val o = arr.optJSONObject(i) ?: continue
+            val title = o.optString("title").trim()
+            val titleId = o.optString("titleId").trim()
+            if (title.isEmpty() || !titleId.startsWith("CUSA")) continue
+            val platform = "ps4"
+            val gameId = o.optString("gameId").ifBlank { titleId }
+            val content = JSONObject()
+                .put("title", title)
+                .put("titleId", titleId)
+                .put("platform", platform)
+                .put("gameId", gameId)
+                .put("format", o.optString("format", "Unknown"))
+            if (o.has("contentFormat")) content.put("contentFormat", o.optString("contentFormat"))
+            val option = GameOption(
+                id = o.optString("id"),
+                releaseId = o.optString("id"),
+                title = title,
+                titleId = titleId,
+                platform = platform,
+                format = o.optString("format", "Unknown"),
+                source = o.optString("sourceId"),
+                provider = o.optString("provider", o.optString("sourceId")),
+                sizeBytes = o.optLong("sizeBytes"),
+                filename = o.optString("filename"),
+                url = o.optString("url"),
+                browserUrl = o.optString("browserUrl"),
+                sha256 = o.optString("sha256"),
+                content = content,
+            )
+            val key = "$gameId|$platform"
+            grouped.getOrPut(key) { ArrayList() }.add(option)
+            meta.putIfAbsent(key, o)
+        }
+        val list = ArrayList<Game>(grouped.size)
+        for ((key, options) in grouped) {
+            val o = meta[key] ?: continue
+            val sorted = options.sortedWith(
+                compareByDescending<GameOption> { it.phoneAvailable }
+                    .thenBy { it.format }
+                    .thenBy { it.sizeBytes }
+            )
+            list.add(
+                Game(
+                    key = key,
+                    gameId = o.optString("gameId").ifBlank { options.first().titleId },
+                    title = options.first().title,
+                    titleId = options.first().titleId,
+                    platform = options.first().platform,
+                    genre = o.optString("genre"),
+                    region = o.optString("region"),
+                    cover = safeUrl(
+                        o.optString("cover").ifBlank {
+                            o.optString("posterUrl").ifBlank { o.optString("originalPosterUrl") }
+                        }
+                    ),
+                    options = sorted,
+                )
+            )
+        }
+        list.sortBy { it.title.lowercase() }
+        ps4Supplement = list
     }
 
     private fun safeUrl(url: String): String {

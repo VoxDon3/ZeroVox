@@ -184,7 +184,7 @@ class TransferService : Service() {
                 val input = body.byteStream()
                 val chunk = ByteArray(chunkSize)
                 var lastReport = System.currentTimeMillis()
-                var lastBytes = 0L
+                val meter = SpeedMeter().apply { reset(lastReport, 0L) }
 
                 while (true) {
                     if (TransferStore.cancelRequested) throw CancelledException()
@@ -204,8 +204,7 @@ class TransferService : Service() {
 
                     val now = System.currentTimeMillis()
                     if (now - lastReport >= 700) {
-                        val dt = (now - lastReport).coerceAtLeast(1) / 1000.0
-                        val speed = (offset - lastBytes) / dt
+                        val speed = meter.update(now, offset)
                         TransferStore.update(received = offset, speed = speed)
                         notify(
                             title,
@@ -213,7 +212,6 @@ class TransferService : Service() {
                             progress(offset, total)
                         )
                         lastReport = now
-                        lastBytes = offset
                     }
                     if (filled < chunkSize) break
                 }
@@ -319,7 +317,7 @@ class TransferService : Service() {
                 val chunk = ByteArray(chunkSize)
                 var offset = 0L
                 var lastReport = System.currentTimeMillis()
-                var lastBytes = 0L
+                val meter = SpeedMeter().apply { reset(lastReport, 0L) }
 
                 while (true) {
                     if (TransferStore.cancelRequested) throw CancelledException()
@@ -339,8 +337,7 @@ class TransferService : Service() {
 
                     val now = System.currentTimeMillis()
                     if (now - lastReport >= 700) {
-                        val dt = (now - lastReport).coerceAtLeast(1) / 1000.0
-                        val speed = (offset - lastBytes) / dt
+                        val speed = meter.update(now, offset)
                         TransferStore.update(received = offset, speed = speed)
                         notify(
                             title,
@@ -348,7 +345,6 @@ class TransferService : Service() {
                             progress(offset, total)
                         )
                         lastReport = now
-                        lastBytes = offset
                     }
                     if (filled < chunkSize) break
                 }
@@ -575,13 +571,13 @@ class TransferService : Service() {
                         mode = "local",
                     )
                 }
-                notify(title, getString(R.string.notif_downloading), if (total > 0) progress(offset, total) else 0)
+                notify(title, getString(R.string.notif_downloading_phone), if (total > 0) progress(offset, total) else 0)
 
                 val digest = if (offset == 0L) MessageDigest.getInstance("SHA-256") else null
                 val input = body.byteStream()
                 val buffer = ByteArray(256 * 1024)
                 var lastReport = System.currentTimeMillis()
-                var lastBytes = offset
+                val meter = SpeedMeter().apply { reset(lastReport, offset) }
                 while (true) {
                     if (TransferStore.cancelRequested) throw CancelledException()
                     if (TransferStore.pauseRequested) throw PausedException(offset)
@@ -593,8 +589,7 @@ class TransferService : Service() {
                     offset += n
                     val now = System.currentTimeMillis()
                     if (now - lastReport >= 700) {
-                        val dt = (now - lastReport).coerceAtLeast(1) / 1000.0
-                        val speed = (offset - lastBytes) / dt
+                        val speed = meter.update(now, offset)
                         TransferStore.update(received = offset, speed = speed)
                         notify(
                             title,
@@ -603,7 +598,6 @@ class TransferService : Service() {
                             if (total > 0) progress(offset, total) else 0
                         )
                         lastReport = now
-                        lastBytes = offset
                     }
                 }
                 created.stream.flush()
