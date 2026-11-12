@@ -154,6 +154,7 @@ class DownloadWebActivity : ComponentActivity() {
     ) {
         val title = intent.getStringExtra("title").orEmpty()
         val nameFromIntent = intent.getStringExtra("filename").orEmpty()
+        val cover = intent.getStringExtra("cover").orEmpty()
         // Prefer the real file name from the download link/page title so the
         // saved path is not polluted with the catalog game name or version.
         val realName = guessName(downloadUrl, contentDisposition)
@@ -170,8 +171,8 @@ class DownloadWebActivity : ComponentActivity() {
         val origin = if (::web.isInitialized) web.url.orEmpty() else ""
 
         // Show the card instantly, before the first byte is fetched.
-        TransferStore.reset(title.ifBlank { name }, name, size)
-        TransferStore.update(state = "preparing")
+        TransferStore.reset(title.ifBlank { name }, name, size, cover)
+        TransferStore.update(state = "preparing", cover = cover.takeIf { it.isNotBlank() })
 
         val svc = Intent(this, TransferService::class.java).apply {
             putExtra("mode", "local")
@@ -182,6 +183,7 @@ class DownloadWebActivity : ComponentActivity() {
             putExtra("cookie", cookie)
             putExtra("userAgent", ua)
             putExtra("origin", origin)
+            putExtra("cover", cover)
         }
         ContextCompat.startForegroundService(this, svc)
         setResult(RESULT_OK)

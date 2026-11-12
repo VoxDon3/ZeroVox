@@ -208,6 +208,50 @@ object CatalogRepo {
 
     private fun cacheFile(context: Context, catalogId: String) = File(context.filesDir, "catalog-$catalogId.json")
 
+    /**
+     * Find a game cover in any cached catalogue, even when that catalogue is not
+     * the currently selected one. Used as a fallback for transfer cards so the
+     * real game icon survives an app restart or a catalogue switch.
+     */
+    fun findCachedCover(context: Context, title: String, filename: String): String {
+        val wantedTitle = title.trim().lowercase()
+        val wantedFile = filename.trim().lowercase()
+        if (wantedTitle.isBlank() && wantedFile.isBlank()) return ""
+        for (catalog in catalogs) {
+            val file = cacheFile(context, catalog.id)
+            if (!file.exists()) continue
+            val raw = runCatching { file.readText() }.getOrNull() ?: continue
+            if (wantedTitle.isNotBlank() && !raw.contains(wantedTitle, ignoreCase = true) &&
+                wantedFile.isNotBlank() && !raw.contains(wantedFile, ignoreCase = true)
+            ) continue
+            val root = runCatching { JSONObject(raw) }.getOrNull() ?: continue
+            val arr = root.optJSONArray("releases")
+                ?: root.optJSONArray("packages")
+                ?: root.optJSONArray("games")
+                ?: continue
+            for (i in 0 until arr.length()) {
+                val o = arr.optJSONObject(i) ?: continue
+                val oTitle = o.optString("title").trim().lowercase()
+                val oFile = o.optString("filename").trim().lowercase()
+                val matches = when {
+                    wantedTitle.isNotBlank() && oTitle == wantedTitle -> true
+                    wantedFile.isNotBlank() && oFile == wantedFile -> true
+                    wantedTitle.isNotBlank() && oTitle.isNotBlank() &&
+                        (oTitle.contains(wantedTitle) || wantedTitle.contains(oTitle)) -> true
+                    wantedFile.isNotBlank() && oFile.isNotBlank() &&
+                        (oFile.contains(wantedFile) || wantedFile.contains(oFile)) -> true
+                    else -> false
+                }
+                if (!matches) continue
+                val cover = o.optString("cover").ifBlank {
+                    o.optString("posterUrl").ifBlank { o.optString("originalPosterUrl") }
+                }
+                if (cover.isNotBlank()) return safeUrl(cover)
+            }
+        }
+        return ""
+    }
+
     private fun safeUrl(url: String): String {
         val trimmed = url.trim()
         if (trimmed.contains("evoX-CoreOS") && trimmed.contains("/assets/icon/")) {

@@ -9,6 +9,7 @@ data class TransferState(
     val id: String = "",
     val title: String = "",
     val filename: String = "",
+    val cover: String = "",
     val state: String = "idle",
     val received: Long = 0,
     val total: Long = 0,
@@ -57,13 +58,14 @@ object TransferStore {
         }
     }
 
-    fun reset(title: String, filename: String, total: Long) {
+    fun reset(title: String, filename: String, total: Long, cover: String = "") {
         muted = false
         cancelRequested = false
         pauseRequested = false
         current = TransferState(
             title = title,
             filename = filename,
+            cover = cover,
             state = "preparing",
             total = total,
         )
@@ -85,6 +87,7 @@ object TransferStore {
         total: Long? = null,
         title: String? = null,
         filename: String? = null,
+        cover: String? = null,
         mode: String? = null,
     ) {
         if (muted) return
@@ -104,6 +107,7 @@ object TransferStore {
             total = total ?: c.total,
             title = title ?: c.title,
             filename = filename ?: c.filename,
+            cover = cover ?: c.cover,
             mode = mode ?: c.mode,
         )
         current = next
@@ -156,6 +160,7 @@ object TransferStore {
         val json = if (!shouldKeep) "" else JSONObject().apply {
             put("title", c.title)
             put("filename", c.filename)
+            put("cover", c.cover)
             put("state", c.state)
             put("received", c.received)
             put("total", c.total)
@@ -200,6 +205,7 @@ object TransferStore {
         current = TransferState(
             title = obj.optString("title", ""),
             filename = obj.optString("filename", ""),
+            cover = obj.optString("cover", ""),
             state = state,
             received = received,
             total = total,

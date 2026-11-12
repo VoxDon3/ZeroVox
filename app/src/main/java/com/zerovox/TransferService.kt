@@ -58,6 +58,7 @@ class TransferService : Service() {
         val cookie = intent.getStringExtra("cookie") ?: ""
         val userAgent = intent.getStringExtra("userAgent") ?: ""
         val origin = intent.getStringExtra("origin") ?: ""
+        val cover = intent.getStringExtra("cover") ?: ""
         val resume = intent.getBooleanExtra("resume", false)
 
         if (worker?.isAlive == true) return START_NOT_STICKY
@@ -65,7 +66,7 @@ class TransferService : Service() {
 
         if (mode == "local") {
             if (!resume) {
-                TransferStore.reset(title, filename, size)
+                TransferStore.reset(title, filename, size, cover)
             } else {
                 TransferStore.pauseRequested = false
                 TransferStore.cancelRequested = false
@@ -75,6 +76,7 @@ class TransferService : Service() {
                 url = url,
                 filename = filename,
                 title = title,
+                cover = cover.takeIf { it.isNotBlank() },
             )
             TransferStore.persistNow()
             if (url.isBlank()) {
@@ -89,8 +91,8 @@ class TransferService : Service() {
             return START_NOT_STICKY
         }
 
-        TransferStore.reset(title, filename, size)
-        TransferStore.update(mode = mode)
+        TransferStore.reset(title, filename, size, cover)
+        TransferStore.update(mode = mode, cover = cover.takeIf { it.isNotBlank() })
 
         if (mode == "send") {
             val uri = intent.getStringExtra("uri") ?: ""
@@ -175,7 +177,7 @@ class TransferService : Service() {
                     .put("content", content)
                 val beginResp = api.receiveBegin(begin)
                 if (!beginResp.ok) throw RuntimeException(beginResp.message())
-                TransferStore.reset(title, filename, total)
+                TransferStore.reset(title, filename, total, TransferStore.current.cover)
                 TransferStore.update(state = "downloading")
                 notify(title, getString(R.string.notif_downloading), 0)
 
@@ -308,7 +310,7 @@ class TransferService : Service() {
                     .put("content", content)
                 val beginResp = api.receiveBegin(begin)
                 if (!beginResp.ok) throw RuntimeException(beginResp.message())
-                TransferStore.reset(title, safeName, total)
+                TransferStore.reset(title, safeName, total, TransferStore.current.cover)
                 TransferStore.update(state = "downloading")
                 notify(title, getString(R.string.notif_downloading), 0)
 

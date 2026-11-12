@@ -102,6 +102,7 @@ class MainActivity : ComponentActivity() {
     private var refreshRunnable: Runnable? = null
     private var refreshing = false
     private var connectionCheckRunning = false
+    private val coverLookupKeys = mutableSetOf<String>()
     private var setupAfterPair = "catalog"
 
     private var filesStorage = "data"
@@ -565,9 +566,10 @@ class MainActivity : ComponentActivity() {
         pill.addView(statusName)
         val settingsButton = ImageView(this).apply {
             setImageResource(R.drawable.ic_settings)
-            setColorFilter(Palette.textSecondary)
+            setColorFilter(Palette.text)
+            scaleType = ImageView.ScaleType.FIT_CENTER
             contentDescription = getString(R.string.settings_title)
-            setPadding(dpx(5), dpx(5), dpx(5), dpx(5))
+            setPadding(dpx(4), dpx(4), dpx(4), dpx(4))
             pressAnimation()
             setOnClickListener { showSettingsDialog() }
         }
@@ -592,7 +594,7 @@ class MainActivity : ComponentActivity() {
         header.addView(logoRow, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         header.addView(
             settingsButton,
-            LinearLayout.LayoutParams(dpx(30), dpx(30)).apply {
+            LinearLayout.LayoutParams(dpx(36), dpx(36)).apply {
                 gravity = Gravity.CENTER_VERTICAL
             }
         )
@@ -694,24 +696,18 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun refreshConnectionPill() {
-        if (!prefs.paired) {
-            updateConnectionPill()
-            return
-        }
+        // The paired state is the source of truth for the pill. It must turn
+        // green immediately after pairing and stay green even if a transient
+        // health check fails (e.g. the console is busy or the network blips).
+        updateConnectionPill()
+        if (!prefs.paired) return
         if (connectionCheckRunning) return
         connectionCheckRunning = true
-        setConnectionPill(getString(R.string.status_checking), Palette.textSecondary, false)
         io.execute {
-            val online = api.system().ok
+            runCatching { api.system() }
             runOnUiThread {
                 connectionCheckRunning = false
-                if (!prefs.paired) {
-                    updateConnectionPill()
-                } else if (online) {
-                    updateConnectionPill()
-                } else {
-                    setConnectionPill(getString(R.string.status_offline), Palette.danger, false)
-                }
+                updateConnectionPill()
             }
         }
     }
@@ -1226,11 +1222,11 @@ class MainActivity : ComponentActivity() {
                     showSetup()
                     return@actionButton
                 }
-                openWebForDownload(option, "ps5")
+                openWebForDownload(option, "ps5", game.cover)
             }
             val phone = actionButton(getString(R.string.phone), false) {
                 dialog.dismiss()
-                openWebForDownload(option, "phone")
+                openWebForDownload(option, "phone", game.cover)
             }
             phone.isEnabled = option.hasLink
             phone.alpha = if (option.hasLink) 1f else 0.4f
@@ -1341,7 +1337,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun openWebForDownload(option: GameOption, mode: String) {
+    private fun openWebForDownload(option: GameOption, mode: String, cover: String = "") {
         val url = option.browserUrl.ifBlank { option.url }
         if (url.isBlank()) {
             toast(getString(R.string.browser_required))
@@ -1354,6 +1350,7 @@ class MainActivity : ComponentActivity() {
             putExtra("filename", option.filename)
             putExtra("size", option.sizeBytes)
             putExtra("password", option.password)
+            putExtra("cover", cover)
         }
         webDownloadLauncher.launch(intent)
     }
@@ -1369,6 +1366,7 @@ class MainActivity : ComponentActivity() {
             return
         }
         if (d.uri.isBlank()) return
+        val cover = findCatalogGame("", "", d.filename)?.cover.orEmpty()
         val intent = Intent(this, TransferService::class.java).apply {
             putExtra("mode", "send")
             putExtra("title", d.filename)
@@ -1376,6 +1374,7 @@ class MainActivity : ComponentActivity() {
             putExtra("filename", d.filename)
             putExtra("size", d.size)
             putExtra("storageId", storage.id)
+            putExtra("cover", cover)
         }
         ContextCompat.startForegroundService(this, intent)
         toast(getString(R.string.send_started, d.filename))
@@ -1403,6 +1402,7 @@ class MainActivity : ComponentActivity() {
             putExtra("filename", t.filename)
             putExtra("size", t.total)
             putExtra("storageId", prefs.storageId)
+            putExtra("cover", t.cover)
         }
         ContextCompat.startForegroundService(this, intent)
         toast(getString(R.string.send_started, t.filename))
@@ -1833,8 +1833,29 @@ class MainActivity : ComponentActivity() {
         ContextCompat.startForegroundService(this, intent)
     }
 
+    private fun resolveTransferCover(t: TransferState) {
+        val key = t.title + "|" + t.filename
+        if (t.cover.isNotBlank() || !coverLookupKeys.add(key)) return
+        io.execute {
+            val cover = CatalogRepo.findCachedCover(this@MainActivity, t.title, t.filename)
+            if (cover.isNotBlank()) {
+                TransferStore.update(cover = cover)
+                TransferStore.persistNow()
+                runOnUiThread { if (tab == "downloads") showDownloads() }
+            }
+        }
+    }
+
     private fun addTransferCard(container: LinearLayout, t: TransferState) {
         val game = findCatalogGame(t.title, "", t.filename)
+        val coverUrl = t.cover.ifBlank { game?.cover.orEmpty() }
+        when {
+            coverUrl.isBlank() -> resolveTransferCover(t)
+            t.cover.isBlank() -> {
+                TransferStore.update(cover = coverUrl)
+                TransferStore.persistNow()
+            }
+        }
         val card = softCard(10)
         card.layoutParams = LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
@@ -1844,7 +1865,7 @@ class MainActivity : ComponentActivity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        val cover = gameCover(game?.cover, 52, 68)
+        val cover = gameCover(coverUrl, 52, 68)
         (cover.layoutParams as LinearLayout.LayoutParams).marginEnd = dpx(10)
         row.addView(cover)
 
