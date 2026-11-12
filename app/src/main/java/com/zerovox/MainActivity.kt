@@ -25,8 +25,10 @@ import android.provider.Settings
 import android.text.Editable
 import android.text.TextUtils
 import android.text.TextWatcher
+import android.view.GestureDetector
 import android.view.Gravity
 import android.view.HapticFeedbackConstants
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
@@ -60,6 +62,7 @@ import coil.load
 import org.json.JSONObject
 import java.util.concurrent.Executors
 import java.io.File
+import kotlin.math.abs
 
 class MainActivity : ComponentActivity() {
     companion object {
@@ -982,6 +985,12 @@ class MainActivity : ComponentActivity() {
                 LinearLayout.LayoutParams.WRAP_CONTENT
             )
         )
+        catalogChipViews[CatalogRepo.currentCatalogId]?.let { selected ->
+            catalogScroll.post {
+                val target = (selected.left - dpx(16)).coerceAtLeast(0)
+                catalogScroll.smoothScrollTo(target, 0)
+            }
+        }
         root.addView(spacer(8))
 
         val chips = LinearLayout(this).apply {
@@ -1032,11 +1041,40 @@ class MainActivity : ComponentActivity() {
         catalogAdapter = CatalogAdapter(ArrayList()) { game -> showOptions(game) }
         list.adapter = catalogAdapter
         catalogList = list
+        val catalogSwipe = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
+            override fun onFling(
+                e1: MotionEvent?,
+                e2: MotionEvent,
+                velocityX: Float,
+                velocityY: Float
+            ): Boolean {
+                if (e1 == null) return false
+                val dx = e2.x - e1.x
+                val dy = e2.y - e1.y
+                if (abs(dx) > abs(dy) * 1.5f && abs(dx) > dpx(70) &&
+                    abs(velocityX) > abs(velocityY)
+                ) {
+                    runOnUiThread { switchCatalog(if (dx < 0) 1 else -1) }
+                    return true
+                }
+                return false
+            }
+        })
+        list.addOnItemTouchListener(object : RecyclerView.SimpleOnItemTouchListener() {
+            override fun onInterceptTouchEvent(rv: RecyclerView, e: MotionEvent): Boolean {
+                catalogSwipe.onTouchEvent(e)
+                return false
+            }
+        })
         root.addView(list, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
 
         catalogEmpty = bodyText(getString(R.string.loading_catalog)).apply {
             gravity = Gravity.CENTER
             setPadding(dpx(20), dpx(30), dpx(20), dpx(30))
+            setOnTouchListener { _, event ->
+                catalogSwipe.onTouchEvent(event)
+                false
+            }
         }
         root.addView(
             catalogEmpty,
@@ -1127,6 +1165,19 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    private fun switchCatalog(direction: Int) {
+        val list = CatalogRepo.catalogs
+        if (list.size < 2) return
+        val current = list.indexOfFirst { it.id == CatalogRepo.currentCatalogId }
+            .let { if (it < 0) 0 else it }
+        val next = (current + direction + list.size) % list.size
+        val target = list[next]
+        if (target.id == CatalogRepo.currentCatalogId) return
+        CatalogRepo.setCurrentCatalog(target.id)
+        prefs.catalogId = target.id
+        showCatalog()
     }
 
     // ---------------------------------------------------------------- options
