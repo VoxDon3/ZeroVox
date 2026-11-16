@@ -7,7 +7,7 @@
 <h1 align="center">Zero Vox</h1>
 
 <p align="center">
-  تطبيق أندرويد لاستعراض كتالوج ألعاب PS5 وPS4، ونقل الملفات إلى الجهاز، وإدارة قوائم CheatRunner.
+  An Android app for browsing PS5 &amp; PS4 game catalogues, transferring files to the console, and managing CheatRunner lists.
 </p>
 
 <p align="center">
@@ -16,52 +16,52 @@
 
 ---
 
-## نظرة عامة
+## Overview
 
-**Zero Vox** واجهة عربية أولًا لأندرويد تجمع كتالوج الألعاب، وإدارة النقل عبر الشبكة المحلية، وقوائم CheatRunner في تطبيق واحد. صُمم التطبيق ليكون خفيفًا وسريعًا، مع واجهة داكنة زجاجية، دعم كامل للاتجاه من اليمين إلى اليسار، وترجمة إلى العربية والإنجليزية والفرنسية والإسبانية والكورية.
+**Zero Vox** is an Arabic-first Android app that brings the game catalogue, local network transfers, and CheatRunner lists together in one place. It is designed to be lightweight and fast, with a dark glass-style UI, full right-to-left (RTL) support, and translations into Arabic, English, French, Spanish, and Korean.
 
-> التطبيق لا يستضيف أي ألعاب. استخدمه فقط مع المحتوى الذي تملك حق استخدامه.
+> The app hosts no games. Use it only with content you have the right to access.
 
-## المزايا
+## Features
 
-- **كتالوج موحّد:** تصفح ألعاب PS5 وألعاب PS4، مع بحث بالاسم أو Title ID.
-- **تصنيف واضح:** فلاتر لكل الألعاب، PS5، وPS4، مع شارات النوع والمنطقة وحجم الملف.
-- **نقل إلى PS5:** أرسل الملفات من الهاتف إلى الجهاز عبر الشبكة المحلية، مع متابعة التقدم والتحقق.
-- **طابور التنزيل:** راقب عمليات PS5، وأوقفها أو استأنفها أو أعد المحاولة.
-- **قوائم CheatRunner:** اعرض الألعاب المثبتة، افتح ملفات Cheat، وبدّل الإضافات عندما يكون اللعب نشطًا.
-- **تخصيص كامل:** الوضع الداكن والفاتح، الاهتزاز عند الضغط، تغيير اللغة من الإعدادات، ودعم RTL.
-- **بدون تسجيل دخول:** لا حساب ولا سحابة؛ الإعدادات تبقى على الهاتف.
+- **Unified catalogue:** Browse PS5 and PS4 games with search by name or Title ID.
+- **Clear filtering:** Filters for All, PS5, and PS4 games, with badges for type, region, and file size.
+- **Transfer to PS5:** Send files from your phone to the console over the local network, with progress tracking and verification.
+- **Download queue:** Monitor PS5 jobs — pause, resume, or retry them.
+- **CheatRunner lists:** View installed games, open cheat files, and toggle cheats while a game is running.
+- **Full customization:** Dark/light mode, haptics, language switching in settings, and RTL support.
+- **No sign-in:** No account and no cloud — settings stay on your phone.
 
-## المتطلبات
+## Requirements
 
-- أندرويد 8.0 أو أحدث.
-- الهاتف وجهاز PS5 على نفس شبكة Wi-Fi.
-- خدمة الـ PS5 المصاحبة تعمل على الجهاز لعمليات الاتصال والنقل.
-- **CheatRunner** اختياري، ويعمل على المنفذ الافتراضي `9999`.
+- Android 8.0 or newer.
+- Phone and PS5 on the same Wi-Fi network.
+- The PS5 companion service running on the console for connection and transfer operations.
+- **CheatRunner** is optional and uses the default port `9999`.
 
-## التثبيت
+## Installation
 
-1. نزّل ملف APK من [صفحة الإصدارات](https://github.com/VoxDon3/ZeroVox/releases/latest) أو من [الرابط المباشر](https://github.com/VoxDon3/ZeroVox/releases/download/v1.0.1/ZeroVox-1.0.1-release.apk).
-2. اسمح بتثبيت التطبيقات من المصدر غير المعروف إذا طلب النظام ذلك.
-3. افتح Zero Vox، ثم أدخل عنوان PS5 ورمز الاقتران من الإعدادات.
-4. بعد الاقتران، افتح تبويب **Games** لتحميل الكتالوج.
+1. Download the APK from the [releases page](https://github.com/VoxDon3/ZeroVox/releases/latest) or the [direct link](https://github.com/VoxDon3/ZeroVox/releases/download/v1.0.1/ZeroVox-1.0.1-release.apk).
+2. Allow installation from unknown sources if prompted.
+3. Open Zero Vox, then enter the PS5 address and pairing code in settings.
+4. After pairing, open the **Games** tab to load the catalogue.
 
-> **مهم:** الإصدار 1.0.1 الحالي موقّع بمفتاح إصدار جديد. إذا كانت لديك نسخة 1.0.1 debug سابقة، فأزل التطبيق القديم أولًا؛ لن يُحدّث تلقائيًا إلى نسخة release. إزالة التطبيق تحذف بياناته المحلية.
+> **Important:** Version 1.0.1 is signed with a new release key. If you have a previous 1.0.1 debug build, uninstall it first — it will not update automatically to the release build. Uninstalling deletes local data.
 
-بصمة SHA-256 لملف APK:
+APK SHA-256 fingerprint:
 
 ```text
 6def49f8c549da3e145deddbe10b3085ca8a36703823289d5b92c027b2f281c2
 ```
 
-## إعداد CheatRunner
+## CheatRunner setup
 
-1. ثبّت CheatRunner وشغّله على PS5.
-2. تأكد أن الهاتف والجهاز على نفس الشبكة.
-3. افتح تبويب **Cheats** في Zero Vox.
-4. يستخدم التطبيق عنوان PS5 نفسه مع المنفذ `9999`، ويعرض ألعاب PS5 وPS4 المثبتة في قسمين منفصلين.
+1. Install and run CheatRunner on the PS5.
+2. Make sure the phone and console are on the same network.
+3. Open the **Cheats** tab in Zero Vox.
+4. The app uses the same PS5 address with port `9999`, and lists installed PS5 and PS4 games in two separate sections.
 
-## البناء من المصدر
+## Building from source
 
 ```bash
 git clone https://github.com/VoxDon3/ZeroVox.git
@@ -69,32 +69,32 @@ cd ZeroVox
 ./gradlew testDebugUnitTest lintDebug assembleDebug
 ```
 
-ينتج ملف APK للتطوير في:
+The debug APK is produced at:
 
 ```text
 app/build/outputs/apk/debug/app-debug.apk
 ```
 
-لبناء نسخة release موقّعة، أنشئ `keystore.properties` في جذر المشروع (وهو مستبعد من git) بالحقول `storeFile` و`storePassword` و`keyAlias` و`keyPassword`، ثم:
+To build a signed release, create a `keystore.properties` file in the project root (excluded from git) with `storeFile`, `storePassword`, `keyAlias`, and `keyPassword`, then:
 
 ```bash
 ./gradlew assembleRelease
 ```
 
-بدون `keystore.properties` سيُبنى APK release غير موقّع.
+Without `keystore.properties`, the release APK will be unsigned.
 
-## الخصوصية والاستخدام
+## Privacy &amp; usage
 
-- لا يجمع التطبيق بيانات شخصية ولا يرسلها إلى خوادم تابعة له.
-- عناوين الاتصال ورمز الاقتران تُحفظ محليًا على الهاتف فقط.
-- يستخدم التطبيق HTTP على الشبكة المحلية للاتصال بخدمة PS5 وCheatRunner، ولا يرسل بيانات إلى خوادم خارجية تابعة له.
-- لا تشارك رمز الاقتران مع أي شخص.
-- Zero Vox أداة إدارة محلية مستقلة، وليست بديلًا عن خدمات PlayStation الرسمية.
-- استخدم التطبيق فقط مع المحتوى الذي تملك حق الوصول إليه أو استخدامه.
+- The app collects no personal data and sends none to its own servers.
+- Connection addresses and the pairing code are stored locally on the phone only.
+- The app uses HTTP over the local network to talk to the PS5 service and CheatRunner; it sends no data to external servers of its own.
+- Never share your pairing code with anyone.
+- Zero Vox is an independent local management tool and is not a replacement for official PlayStation services.
+- Use the app only with content you own or have the right to use.
 
-## الترخيص
+## License
 
-هذا المشروع مخصص للاستخدام الشخصي. راجع ملف الترخيص في المستودع إن وجد.
+This project is intended for personal use. See the license file in the repository if one is provided.
 
 ---
 
