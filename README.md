@@ -1,5 +1,7 @@
 <p align="center">
-  <img src="docs/screenshots/catalog.jpg" width="340" alt="Zero Vox game catalogue on Android">
+  <img src="docs/screenshots/games.png" width="300" alt="Games catalogue">
+  <img src="docs/screenshots/files.png" width="300" alt="File manager">
+  <img src="docs/screenshots/transfers.png" width="300" alt="Transfers">
 </p>
 
 <h1 align="center">Zero Vox</h1>
@@ -80,17 +82,6 @@ app/build/outputs/apk/debug/app-debug.apk
 ```
 
 بدون `keystore.properties` سيُبنى APK release غير موقّع.
-
-
-## لقطات الشاشة / Screenshots
-
-<table>
-  <tr>
-    <td align="center"><b>الألعاب · Games</b><br><img src="docs/screenshots/games.png" width="300" alt="Games"></td>
-    <td align="center"><b>مدير الملفات · Files</b><br><img src="docs/screenshots/files.png" width="300" alt="Files"></td>
-    <td align="center"><b>الترانسفير · Transfers</b><br><img src="docs/screenshots/transfers.png" width="300" alt="Transfers"></td>
-  </tr>
-</table>
 
 ## الخصوصية والاستخدام
 
