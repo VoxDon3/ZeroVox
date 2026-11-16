@@ -81,6 +81,17 @@ app/build/outputs/apk/debug/app-debug.apk
 
 بدون `keystore.properties` سيُبنى APK release غير موقّع.
 
+
+## لقطات الشاشة / Screenshots
+
+<table>
+  <tr>
+    <td align="center"><b>الألعاب · Games</b><br><img src="docs/screenshots/games.png" width="300" alt="Games"></td>
+    <td align="center"><b>مدير الملفات · Files</b><br><img src="docs/screenshots/files.png" width="300" alt="Files"></td>
+    <td align="center"><b>الترانسفير · Transfers</b><br><img src="docs/screenshots/transfers.png" width="300" alt="Transfers"></td>
+  </tr>
+</table>
+
 ## الخصوصية والاستخدام
 
 - لا يجمع التطبيق بيانات شخصية ولا يرسلها إلى خوادم تابعة له.
